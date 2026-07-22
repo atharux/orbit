@@ -1,0 +1,40 @@
+const SETTINGS_KEY = 'pocket-leads:settings'
+
+export interface AppSettings {
+  openRouterApiKey: string
+  openRouterModel: string
+  scraperUrl: string
+}
+
+export const FREE_MODELS = [
+  { id: 'auto', label: 'Auto (OpenRouter picks)' },
+  { id: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1 (free)' },
+  { id: 'deepseek/deepseek-chat:free', label: 'DeepSeek Chat (free)' },
+  { id: 'meta-llama/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (free)' },
+  { id: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B (free)' },
+  { id: 'google/gemma-2-9b-it:free', label: 'Gemma 2 9B (free)' },
+]
+
+const DEFAULTS: AppSettings = {
+  openRouterApiKey: import.meta.env.VITE_OPENROUTER_API_KEY ?? '',
+  openRouterModel: 'auto',
+  scraperUrl: '',
+}
+
+export function loadSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    if (!raw) return { ...DEFAULTS }
+    return { ...DEFAULTS, ...JSON.parse(raw) }
+  } catch {
+    return { ...DEFAULTS }
+  }
+}
+
+export function saveSettings(s: AppSettings): void {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+  } catch (err) {
+    console.warn('Failed to save settings', err)
+  }
+}
