@@ -36,6 +36,34 @@ function nodeToGraphNode(n: any): GraphNode | null {
   }
 }
 
+// Run an arbitrary READ query (used by the free-text "ask the graph" panel).
+// executeRead rejects any write — the LLM-generated Cypher can only read.
+// Returns a human summary + the elementIds of any Node values in the result,
+// so the caller can light those nodes up in the 3D scene.
+export async function runReadCypher(
+  cypher: string,
+): Promise<{ summary: string; nodeIds: string[]; rows: number }> {
+  if (!isLiveConfigured()) throw new Error('Neo4j env not configured')
+  const driver = neo4j.driver(URI!, neo4j.auth.basic(USER!, PASS!))
+  try {
+    const result = await driver.executeQuery(cypher, {}, { database: 'neo4j', routing: 'READ' as any })
+    const nodeIds = new Set<string>()
+    for (const rec of result.records) {
+      for (const key of rec.keys) {
+        const v: any = rec.get(key)
+        // A returned Node has .labels + .elementId; collect it for highlighting.
+        if (v && typeof v === 'object' && Array.isArray(v.labels) && v.elementId) nodeIds.add(v.elementId)
+        // A returned list of nodes
+        if (Array.isArray(v)) for (const item of v) if (item?.elementId && Array.isArray(item?.labels)) nodeIds.add(item.elementId)
+      }
+    }
+    const rows = result.records.length
+    return { summary: `${rows} row${rows === 1 ? '' : 's'} returned`, nodeIds: [...nodeIds], rows }
+  } finally {
+    await driver.close()
+  }
+}
+
 export async function fetchLiveGraph(): Promise<GraphData> {
   if (!isLiveConfigured()) throw new Error('Neo4j env not configured')
   const driver = neo4j.driver(URI!, neo4j.auth.basic(USER!, PASS!))

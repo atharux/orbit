@@ -8,6 +8,7 @@ import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph } from './neo4jSource'
+import { PRESETS, askLive, liveAvailable, type AskResult } from './ask'
 
 // Full-screen immersive 3D graph. The light dashboard drops away into a dark
 // space where venues/contacts float and relationships stream particles. Orbit
@@ -24,7 +25,12 @@ const LINK_COLOR: Record<GraphLink['kind'], string> = {
 
 const DIM = '#1f2937'
 
-export function GraphOverlay({ leads, onClose }: { leads: Lead[]; onClose: () => void }) {
+export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel }: {
+  leads: Lead[]
+  onClose: () => void
+  openRouterApiKey?: string
+  openRouterModel?: string
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<any>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -32,6 +38,14 @@ export function GraphOverlay({ leads, onClose }: { leads: Lead[]; onClose: () =>
   const [liveWarning, setLiveWarning] = useState<string | null>(null)
   const [selected, setSelected] = useState<GraphNode | null>(null)
   const [errMsg, setErrMsg] = useState('')
+  const [graphData, setGraphData] = useState<GraphData | null>(null)
+
+  // Ask panel state
+  const [askInput, setAskInput] = useState('')
+  const [asking, setAsking] = useState(false)
+  const [askResult, setAskResult] = useState<(AskResult & { q: string }) | null>(null)
+  const [askError, setAskError] = useState('')
+  const canAskLive = liveAvailable(openRouterApiKey)
 
   useEffect(() => {
     let disposed = false
@@ -52,6 +66,7 @@ export function GraphOverlay({ leads, onClose }: { leads: Lead[]; onClose: () =>
       .then(data => {
         if (disposed || !containerRef.current) return
         initGraph(data)
+        setGraphData(data)
         setMeta({ origin: data.origin, nodes: data.nodes.length, links: data.links.length, note: data.note })
         setStatus('ready')
       })
@@ -159,13 +174,30 @@ export function GraphOverlay({ leads, onClose }: { leads: Lead[]; onClose: () =>
         setSelected(null)
       })
 
+      // Imperative handle for the ask panel: light up an arbitrary node set.
+      function focusNodes(ids: string[]) {
+        highlightNodes.clear()
+        highlightLinks.clear()
+        setSelected(null)
+        if (ids.length === 0) { controls.autoRotate = true; refreshHighlight(); return }
+        ids.forEach(id => highlightNodes.add(id))
+        for (const l of (Graph.graphData().links as any[])) {
+          const s = typeof l.source === 'object' ? l.source.id : l.source
+          const t = typeof l.target === 'object' ? l.target.id : l.target
+          if (highlightNodes.has(s) && highlightNodes.has(t)) highlightLinks.add(l)
+        }
+        refreshHighlight()
+        controls.autoRotate = false
+        Graph.zoomToFit(1400, 90, (n: any) => highlightNodes.has(n.id))
+      }
+
       const onResize = () => Graph.width(el.clientWidth).height(el.clientHeight)
       window.addEventListener('resize', onResize)
 
       // fit once the layout settles
       setTimeout(() => Graph.zoomToFit(1200, 60), 700)
 
-      graphRef.current = { Graph, onResize }
+      graphRef.current = { Graph, onResize, focusNodes }
       void focused
     }
 
@@ -180,6 +212,38 @@ export function GraphOverlay({ leads, onClose }: { leads: Lead[]; onClose: () =>
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  function runPreset(p: typeof PRESETS[number]) {
+    if (!graphData) return
+    setAskError('')
+    const res = p.run(graphData)
+    setAskResult({ ...res, q: p.q })
+    graphRef.current?.focusNodes(res.nodeIds)
+  }
+
+  async function runAsk() {
+    const q = askInput.trim()
+    if (!q || !graphData) return
+    setAskError(''); setAsking(true); setAskResult(null)
+    try {
+      if (!canAskLive) {
+        setAskError('Free-text questions need a live Neo4j Aura connection plus an OpenRouter key. Use a preset below, or connect Aura in .env.')
+        return
+      }
+      const res = await askLive(q, openRouterApiKey!, openRouterModel)
+      setAskResult({ ...res, q })
+      graphRef.current?.focusNodes(res.nodeIds)
+    } catch (e: any) {
+      setAskError(String(e?.message ?? e))
+    } finally {
+      setAsking(false)
+    }
+  }
+
+  function clearAsk() {
+    setAskResult(null); setAskError(''); setAskInput('')
+    graphRef.current?.focusNodes([])
+  }
 
   const originBadge: Record<Origin, { text: string; color: string }> = {
     live: { text: 'LIVE · NEO4J AURA', color: '#34d399' },
@@ -222,6 +286,52 @@ export function GraphOverlay({ leads, onClose }: { leads: Lead[]; onClose: () =>
           </div>
         ))}
       </div>
+
+      {/* Ask the graph */}
+      {status === 'ready' && (
+        <div style={styles.ask}>
+          <div style={styles.askHead}>
+            ASK THE GRAPH
+            <span style={{ ...styles.askLive, color: canAskLive ? '#34d399' : '#475569' }}>
+              {canAskLive ? '● live' : '○ presets'}
+            </span>
+          </div>
+
+          <div style={styles.askRow}>
+            <input
+              style={styles.askInput}
+              placeholder={canAskLive ? 'Ask in plain English…' : 'Connect Aura for free text'}
+              value={askInput}
+              onChange={e => setAskInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') runAsk() }}
+            />
+            <button style={styles.askBtn} onClick={runAsk} disabled={asking}>
+              {asking ? '…' : '→'}
+            </button>
+          </div>
+
+          <div style={styles.presetList}>
+            {PRESETS.map(p => (
+              <button key={p.id} style={styles.presetChip} onClick={() => runPreset(p)}>
+                {p.q}
+              </button>
+            ))}
+          </div>
+
+          {askError && <div style={styles.askErr}>{askError}</div>}
+
+          {askResult && (
+            <div style={styles.answer}>
+              <div style={styles.answerQ}>{askResult.q}</div>
+              <div style={styles.answerA}>{askResult.answer}</div>
+              {askResult.cypher && (
+                <pre style={styles.cypher}>{askResult.cypher}</pre>
+              )}
+              <button style={styles.clearBtn} onClick={clearAsk}>clear</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Selected node card */}
       {selected && (
@@ -271,6 +381,48 @@ const styles: Record<string, React.CSSProperties> = {
   center: {
     position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
     color: '#64748b', fontFamily: "'DM Mono', monospace", fontSize: 13, zIndex: 2, pointerEvents: 'none',
+  },
+  ask: {
+    position: 'absolute', left: 20, top: 64, zIndex: 3, width: 300,
+    maxHeight: 'calc(100vh - 200px)', overflowY: 'auto',
+    background: '#0b0e14e6', border: '1px solid #1f2937', borderRadius: 8, padding: 14,
+    fontFamily: "'DM Mono', monospace", color: '#e5e7eb',
+    boxShadow: '0 10px 40px #0008',
+  },
+  askHead: { fontSize: 11, letterSpacing: '.14em', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  askLive: { fontSize: 10, letterSpacing: '.06em' },
+  askRow: { display: 'flex', gap: 6, marginTop: 10 },
+  askInput: {
+    flex: 1, background: '#05060a', border: '1px solid #1f2937', borderRadius: 4,
+    padding: '7px 9px', color: '#e5e7eb', fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+  },
+  askBtn: {
+    width: 34, background: '#111826', border: '1px solid #22d3ee55', borderRadius: 4,
+    color: '#22d3ee', cursor: 'pointer', fontSize: 14,
+  },
+  presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10 },
+  presetChip: {
+    textAlign: 'left', background: '#111826', border: '1px solid #1f2937', borderRadius: 4,
+    padding: '7px 9px', color: '#cbd5e1', cursor: 'pointer', fontSize: 11, lineHeight: 1.35,
+    fontFamily: "'DM Mono', monospace",
+  },
+  askErr: {
+    marginTop: 10, background: '#3b1d0e', border: '1px solid #f97316', color: '#fdba74',
+    fontSize: 11, padding: '7px 9px', borderRadius: 4, lineHeight: 1.4,
+  },
+  answer: {
+    marginTop: 10, borderTop: '1px solid #1f2937', paddingTop: 10,
+  },
+  answerQ: { fontSize: 10, color: '#64748b', letterSpacing: '.04em' },
+  answerA: { fontSize: 12.5, color: '#e5e7eb', marginTop: 4, lineHeight: 1.5 },
+  cypher: {
+    marginTop: 8, background: '#05060a', border: '1px solid #1f2937', borderRadius: 4,
+    padding: '8px 9px', color: '#67e8f9', fontSize: 10.5, lineHeight: 1.45,
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflowY: 'auto',
+  },
+  clearBtn: {
+    marginTop: 8, background: 'transparent', border: '1px solid #1f2937', borderRadius: 4,
+    color: '#94a3b8', cursor: 'pointer', fontSize: 10, padding: '4px 10px', fontFamily: "'DM Mono', monospace",
   },
   legend: {
     position: 'absolute', left: 20, bottom: 20, zIndex: 2, display: 'flex', flexDirection: 'column', gap: 6,

@@ -457,7 +457,12 @@ export function App() {
             entering graph space…
           </div>
         }>
-          <GraphOverlay leads={leads} onClose={() => setGraphOpen(false)} />
+          <GraphOverlay
+            leads={leads}
+            onClose={() => setGraphOpen(false)}
+            openRouterApiKey={settings.openRouterApiKey || undefined}
+            openRouterModel={settings.openRouterModel !== 'auto' ? settings.openRouterModel : undefined}
+          />
         </Suspense>
       )}
     </div>
