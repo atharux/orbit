@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import SpriteText from 'three-spritetext'
 import ForceGraph3D from '3d-force-graph'
 import type { Lead } from '../types'
 import type { GraphData, GraphNode, GraphLink } from './types'
@@ -16,11 +17,26 @@ import { PRESETS, askLive, liveAvailable, type AskResult } from './ask'
 
 type Origin = GraphData['origin']
 
+// Each relationship type gets a colour: full when focused, muted at rest (so
+// you can still read how things relate), near-invisible when a different node
+// is focused.
 const LINK_COLOR: Record<GraphLink['kind'], string> = {
-  WORKS_AT: '#64748b',
+  WORKS_AT: '#8aa0b8',
   VERIFIED_BY: '#f97316',
   ENROLLED_IN: '#34d399',
   TARGETS: '#22d3ee',
+}
+const LINK_DIM: Record<GraphLink['kind'], string> = {
+  WORKS_AT: '#39465a',
+  VERIFIED_BY: '#5c3a1e',
+  ENROLLED_IN: '#204a3b',
+  TARGETS: '#1f4552',
+}
+const REL_LABEL: Record<GraphLink['kind'], string> = {
+  WORKS_AT: 'works at',
+  VERIFIED_BY: 'verified by',
+  ENROLLED_IN: 'enrolled in',
+  TARGETS: 'targets',
 }
 
 const DIM = '#1f2937'
@@ -84,13 +100,34 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       const nodeIsHot = (n: any) => highlightNodes.size === 0 || highlightNodes.has(n.id)
 
+      const linkRestColor = (l: any) =>
+        highlightLinks.has(l) ? LINK_COLOR[l.kind as GraphLink['kind']]
+          : highlightNodes.size ? '#151b26'
+          : LINK_DIM[l.kind as GraphLink['kind']]
+
       const Graph = new ForceGraph3D(el, { controlType: 'orbit' })
         .backgroundColor('#05060a')
         .graphData(structuredClone(data))
-        .nodeRelSize(5)
+        .nodeRelSize(4)
         .nodeVal((n: any) => (n.kind === 'venue' ? 6 : n.kind === 'sequence' ? 5 : 3))
-        .nodeOpacity(0.92)
+        .nodeOpacity(1)
         .nodeColor((n: any) => (nodeIsHot(n) ? KIND_COLOR[n.kind as GraphNode['kind']] : DIM))
+        // Permanent text label on every node — kept alongside the default sphere.
+        .nodeThreeObjectExtend(true)
+        .nodeThreeObject((n: any) => {
+          const kind = n.kind as GraphNode['kind']
+          const t = new SpriteText(n.label)
+          t.color = '#e8edf4'
+          t.fontFace = 'DM Mono, ui-monospace, monospace'
+          t.fontWeight = '600'
+          t.textHeight = kind === 'venue' || kind === 'sequence' ? 4 : 2.8
+          t.backgroundColor = 'rgba(5,6,10,0.66)'
+          t.padding = 1.6
+          t.borderRadius = 2
+          t.position.set(0, kind === 'venue' ? 10 : kind === 'sequence' ? 9 : 7, 0)
+          return t
+        })
+        // Hover card carries the detail so the always-on labels stay short.
         .nodeLabel((n: any) => `
           <div style="font:12px/1.4 'DM Mono',monospace;background:#0b0e14;border:1px solid ${KIND_COLOR[n.kind as GraphNode['kind']]};
             padding:6px 9px;border-radius:4px;color:#e5e7eb;max-width:220px">
@@ -100,21 +137,27 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             ${n.sub ? `<div style="color:#9ca3af">${n.sub}</div>` : ''}
             ${n.district ? `<div style="color:#9ca3af">${n.district}</div>` : ''}
           </div>`)
-        .linkColor((l: any) => (highlightLinks.has(l) ? LINK_COLOR[l.kind as GraphLink['kind']] : '#141a24'))
-        .linkWidth((l: any) => (highlightLinks.has(l) ? 1.4 : 0.4))
-        .linkOpacity(0.5)
-        .linkDirectionalParticles((l: any) => (highlightLinks.has(l) || highlightNodes.size === 0 ? 2 : 0))
-        .linkDirectionalParticleWidth(1.6)
-        .linkDirectionalParticleSpeed(0.006)
+        .linkColor(linkRestColor)
+        .linkWidth((l: any) => (highlightLinks.has(l) ? 1.8 : 0.7))
+        .linkOpacity(0.6)
+        // Arrowheads show relationship DIRECTION (who relates to whom) at rest.
+        .linkDirectionalArrowLength(3.4)
+        .linkDirectionalArrowRelPos(0.92)
+        .linkDirectionalArrowColor(linkRestColor)
+        .linkLabel((l: any) => `<span style="font:10px 'DM Mono',monospace;color:${LINK_COLOR[l.kind as GraphLink['kind']]}">${REL_LABEL[l.kind as GraphLink['kind']]}</span>`)
+        // Particles now only stream on the focused neighbourhood — less noise.
+        .linkDirectionalParticles((l: any) => (highlightLinks.has(l) ? 3 : 0))
+        .linkDirectionalParticleWidth(1.8)
+        .linkDirectionalParticleSpeed(0.008)
         .width(el.clientWidth)
         .height(el.clientHeight)
 
-      // Spread nodes out for a more open, navigable space.
-      Graph.d3Force('charge')?.strength(-140)
+      // Spread nodes out so labels don't overlap.
+      Graph.d3Force('charge')?.strength(-200)
 
-      // Bloom glow — the core of the "immersion".
+      // Subtle bloom — enough to feel alive, not enough to wash out the labels.
       const bloom = new UnrealBloomPass(
-        new THREE.Vector2(el.clientWidth, el.clientHeight), 2.4, 0.9, 0.02,
+        new THREE.Vector2(el.clientWidth, el.clientHeight), 0.7, 0.5, 0.28,
       )
       Graph.postProcessingComposer().addPass(bloom)
 
@@ -139,6 +182,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         Graph.nodeColor(Graph.nodeColor())
           .linkColor(Graph.linkColor())
           .linkWidth(Graph.linkWidth())
+          .linkDirectionalArrowColor(Graph.linkDirectionalArrowColor())
           .linkDirectionalParticles(Graph.linkDirectionalParticles())
       }
 
@@ -277,12 +321,20 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       {status === 'loading' && <div style={styles.center}>connecting to graph…</div>}
       {status === 'error' && <div style={styles.center}>could not build graph — {errMsg}</div>}
 
-      {/* Legend */}
+      {/* Legend — nodes (dots) + relationships (arrows) */}
       <div style={styles.legend}>
+        <div style={styles.legendHead}>NODES</div>
         {(Object.keys(KIND_COLOR) as GraphNode['kind'][]).map(k => (
           <div key={k} style={styles.legendRow}>
             <span style={{ ...styles.legendDot, background: KIND_COLOR[k] }} />
             {KIND_LABEL[k]}
+          </div>
+        ))}
+        <div style={{ ...styles.legendHead, marginTop: 8 }}>RELATIONSHIPS</div>
+        {(Object.keys(REL_LABEL) as GraphLink['kind'][]).map(k => (
+          <div key={k} style={styles.legendRow}>
+            <span style={{ ...styles.legendArrow, color: LINK_COLOR[k] }}>→</span>
+            {REL_LABEL[k]}
           </div>
         ))}
       </div>
@@ -429,8 +481,10 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#0b0e14cc', border: '1px solid #1f2937', borderRadius: 6, padding: '10px 12px',
     fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#cbd5e1',
   },
+  legendHead: { fontSize: 9, letterSpacing: '.16em', color: '#64748b' },
   legendRow: { display: 'flex', alignItems: 'center', gap: 8 },
   legendDot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block' },
+  legendArrow: { width: 9, textAlign: 'center', fontWeight: 700, display: 'inline-block' },
   card: {
     position: 'absolute', right: 20, bottom: 20, zIndex: 2, width: 240,
     background: '#0b0e14ee', border: '1px solid', borderRadius: 8, padding: '14px 16px',

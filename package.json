@@ -16,7 +16,8 @@
     "neo4j-driver-lite": "^6.2.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "three-spritetext": "^1.10.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",
