@@ -117,14 +117,17 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         .nodeThreeObject((n: any) => {
           const kind = n.kind as GraphNode['kind']
           const t = new SpriteText(n.label)
-          t.color = '#e8edf4'
+          t.color = '#dfe6f0'
           t.fontFace = 'DM Mono, ui-monospace, monospace'
           t.fontWeight = '600'
-          t.textHeight = kind === 'venue' || kind === 'sequence' ? 4 : 2.8
-          t.backgroundColor = 'rgba(5,6,10,0.66)'
-          t.padding = 1.6
-          t.borderRadius = 2
-          t.position.set(0, kind === 'venue' ? 10 : kind === 'sequence' ? 9 : 7, 0)
+          t.textHeight = kind === 'venue' || kind === 'sequence' ? 3.4 : 2.4
+          // Solid opaque plate + border frames the text so it reads over any node.
+          t.backgroundColor = 'rgba(6,8,13,0.92)'
+          t.borderColor = KIND_COLOR[kind]
+          t.borderWidth = 0.4
+          t.borderRadius = 2.5
+          t.padding = 2.2
+          t.position.set(0, kind === 'venue' ? 11 : kind === 'sequence' ? 10 : 8, 0)
           return t
         })
         // Hover card carries the detail so the always-on labels stay short.
@@ -152,12 +155,13 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         .width(el.clientWidth)
         .height(el.clientHeight)
 
-      // Spread nodes out so labels don't overlap.
-      Graph.d3Force('charge')?.strength(-200)
+      // Spread nodes out further so labels don't collide.
+      Graph.d3Force('charge')?.strength(-320)
 
-      // Subtle bloom — enough to feel alive, not enough to wash out the labels.
+      // Very gentle bloom: nodes still glow softly, but thin label text no
+      // longer smears (low strength + tight radius keeps small bright areas crisp).
       const bloom = new UnrealBloomPass(
-        new THREE.Vector2(el.clientWidth, el.clientHeight), 0.7, 0.5, 0.28,
+        new THREE.Vector2(el.clientWidth, el.clientHeight), 0.32, 0.28, 0.35,
       )
       Graph.postProcessingComposer().addPass(bloom)
 
