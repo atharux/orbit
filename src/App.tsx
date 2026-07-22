@@ -33,6 +33,7 @@ export function App() {
   const [graphOpen, setGraphOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [graphSync, setGraphSync] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle')
+  const [graphSyncMsg, setGraphSyncMsg] = useState('')
   const syncEnabled = SYNC_ENABLED
   const [settings, setSettings] = useState<AppSettings>(loadSettings)
   const [search, setSearch] = useState('')
@@ -143,11 +144,16 @@ export function App() {
   // Never blocks the UI; failures surface only as the header sync indicator.
   function pushToGraph(subset: Lead[]) {
     if (!syncEnabled || subset.length === 0) return
-    setGraphSync('syncing')
+    setGraphSync('syncing'); setGraphSyncMsg('')
     import('./graph/syncToNeo4j')
       .then(m => m.syncLeadsToNeo4j(subset))
       .then(() => setGraphSync('ok'))
-      .catch(err => { console.warn('graph sync failed', err); setGraphSync('error') })
+      .catch(err => {
+        const msg = String(err?.message ?? err)
+        console.warn('graph sync failed', err)
+        setGraphSyncMsg(msg)
+        setGraphSync('error')
+      })
   }
 
   async function handleLeadsAdded(newLeads: Lead[]) {
@@ -282,13 +288,22 @@ export function App() {
             }}
             onClick={() => pushToGraph(leads)}
             disabled={graphSync === 'syncing' || leads.length === 0}
-            title="Push all current leads into the Neo4j Aura graph"
+            title={graphSync === 'error' ? graphSyncMsg : 'Push all current leads into the Neo4j Aura graph'}
           >
             {graphSync === 'syncing' ? 'Syncing…'
               : graphSync === 'error' ? 'Sync failed ↻'
               : graphSync === 'ok' ? 'Synced ✓'
               : 'Sync graph'}
           </button>
+        )}
+        {graphSync === 'error' && graphSyncMsg && (
+          <span
+            className="mono"
+            style={{ fontSize: 10, color: '#EF4444', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={graphSyncMsg}
+          >
+            {graphSyncMsg}
+          </span>
         )}
         <button
           className="btn btn-ghost"
