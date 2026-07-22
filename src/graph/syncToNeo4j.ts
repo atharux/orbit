@@ -16,6 +16,7 @@ import { STATUS_LABEL } from '../types'
 const URI = import.meta.env.VITE_NEO4J_URI as string | undefined
 const USER = import.meta.env.VITE_NEO4J_USERNAME as string | undefined
 const PASS = import.meta.env.VITE_NEO4J_PASSWORD as string | undefined
+const DB = (import.meta.env.VITE_NEO4J_DATABASE as string | undefined) || 'neo4j'
 
 export function graphSyncEnabled(): boolean {
   return Boolean(URI && USER && PASS)
@@ -72,7 +73,7 @@ export async function syncLeadsToNeo4j(leads: Lead[]): Promise<{ synced: number 
   if (leads.length === 0) return { synced: 0 }
   const rows = leads.map(toRow)
   const driver = neo4j.driver(URI!, neo4j.auth.basic(USER!, PASS!))
-  const session = driver.session({ database: 'neo4j' })
+  const session = driver.session({ database: DB })
   try {
     await session.executeWrite(async tx => {
       await tx.run(Q_VENUES, { rows })

@@ -12,6 +12,9 @@ import type { GraphData, GraphNode, GraphLink, NodeKind, LinkKind } from './type
 const URI = import.meta.env.VITE_NEO4J_URI as string | undefined
 const USER = import.meta.env.VITE_NEO4J_USERNAME as string | undefined
 const PASS = import.meta.env.VITE_NEO4J_PASSWORD as string | undefined
+// Aura's database is usually "neo4j", but some instances name it after the
+// instance id — take it from env when provided.
+const DB = (import.meta.env.VITE_NEO4J_DATABASE as string | undefined) || 'neo4j'
 
 export function isLiveConfigured(): boolean {
   return Boolean(URI && USER && PASS)
@@ -46,7 +49,7 @@ export async function runReadCypher(
   if (!isLiveConfigured()) throw new Error('Neo4j env not configured')
   const driver = neo4j.driver(URI!, neo4j.auth.basic(USER!, PASS!))
   try {
-    const result = await driver.executeQuery(cypher, {}, { database: 'neo4j', routing: 'READ' as any })
+    const result = await driver.executeQuery(cypher, {}, { database: DB, routing: 'READ' as any })
     const nodeIds = new Set<string>()
     for (const rec of result.records) {
       for (const key of rec.keys) {
@@ -79,7 +82,7 @@ export async function fetchLiveGraph(): Promise<GraphData> {
        WHERE m:Venue OR m:Contact OR m:Source OR m:Sequence
        RETURN n, type(r) AS rel, m`,
       {},
-      { database: 'neo4j', routing: 'READ' as any },
+      { database: DB, routing: 'READ' as any },
     )
 
     for (const rec of result.records) {
