@@ -13,6 +13,7 @@ export interface GraphNode {
   sub?: string
   verified?: boolean
   district?: string
+  website?: string // venues only — used by the "no website" preset
 }
 
 export type LinkKind = 'WORKS_AT' | 'VERIFIED_BY' | 'ENROLLED_IN' | 'TARGETS'

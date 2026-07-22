@@ -9,7 +9,7 @@ import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph } from './neo4jSource'
-import { PRESETS, askLive, liveAvailable, type AskResult } from './ask'
+import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, type AskResult } from './ask'
 
 // Full-screen immersive 3D graph. The light dashboard drops away into a dark
 // space where venues/contacts float and relationships stream particles. Orbit
@@ -135,7 +135,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [asking, setAsking] = useState(false)
   const [askResult, setAskResult] = useState<(AskResult & { q: string }) | null>(null)
   const [askError, setAskError] = useState('')
+  const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
+  const canAskLocal = !canAskLive && localAvailable(openRouterApiKey, graphData)
 
   useEffect(() => {
     let disposed = false
@@ -364,7 +366,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
   function runPreset(p: typeof PRESETS[number]) {
     if (!graphData) return
-    setAskError('')
+    setAskError(''); setAskNote('')
     const res = p.run(graphData)
     setAskResult({ ...res, q: p.q })
     graphRef.current?.focusNodes(res.nodeIds)
@@ -373,15 +375,21 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   async function runAsk() {
     const q = askInput.trim()
     if (!q || !graphData) return
-    setAskError(''); setAsking(true); setAskResult(null)
+    setAskError(''); setAskNote(''); setAsking(true); setAskResult(null)
     try {
-      if (!canAskLive) {
-        setAskError('Free-text questions need a live Neo4j Aura connection plus an OpenRouter key. Use a preset below, or connect Aura in .env.')
-        return
+      if (canAskLive) {
+        const res = await askLive(q, openRouterApiKey!, openRouterModel)
+        setAskResult({ ...res, q })
+        graphRef.current?.focusNodes(res.nodeIds)
+      } else if (canAskLocal) {
+        const res = await askLocal(q, graphData, openRouterApiKey!, openRouterModel)
+        setAskResult({ ...res, q })
+        graphRef.current?.focusNodes(res.nodeIds)
+      } else {
+        setAskNote(openRouterApiKey
+          ? 'This graph is too large for local free-text — connect Aura in .env for questions at this scale. Presets still work.'
+          : 'Add an OpenRouter key in Settings to ask free-text questions (no Aura needed). Or use a preset below.')
       }
-      const res = await askLive(q, openRouterApiKey!, openRouterModel)
-      setAskResult({ ...res, q })
-      graphRef.current?.focusNodes(res.nodeIds)
     } catch (e: any) {
       setAskError(String(e?.message ?? e))
     } finally {
@@ -390,7 +398,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }
 
   function clearAsk() {
-    setAskResult(null); setAskError(''); setAskInput('')
+    setAskResult(null); setAskError(''); setAskNote(''); setAskInput('')
     graphRef.current?.focusNodes([])
   }
 
@@ -494,15 +502,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         <div style={styles.ask}>
           <div style={styles.askHead}>
             ASK THE GRAPH
-            <span style={{ ...styles.askLive, color: canAskLive ? '#34d399' : '#475569' }}>
-              {canAskLive ? '● live' : '○ presets'}
+            <span style={{ ...styles.askLive, color: canAskLive ? '#34d399' : canAskLocal ? '#22d3ee' : '#8b8677' }}>
+              {canAskLive ? '● live' : canAskLocal ? '● local' : '○ presets'}
             </span>
           </div>
 
           <div style={styles.askRow}>
             <input
               style={styles.askInput}
-              placeholder={canAskLive ? 'Ask in plain English…' : 'Connect Aura for free text'}
+              placeholder={canAskLive || canAskLocal ? 'Ask in plain English…' : 'Add an AI key to ask freely'}
               value={askInput}
               onChange={e => setAskInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') runAsk() }}
@@ -520,6 +528,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             ))}
           </div>
 
+          {askNote && <div style={styles.askInfo}>{askNote}</div>}
           {askError && <div style={styles.askErr}>{askError}</div>}
 
           {askResult && (
@@ -655,6 +664,10 @@ function makeStyles(mode: ThemeMode): Styles {
     askErr: {
       marginTop: 10, background: '#3b1d0e', border: '1px solid #f97316', color: '#fdba74',
       fontSize: 11, padding: '7px 9px', borderRadius: 4, lineHeight: 1.4,
+    },
+    askInfo: {
+      marginTop: 10, background: t.solid, border: `1px solid ${t.border}`, color: t.muted,
+      fontSize: 11, padding: '7px 9px', borderRadius: 4, lineHeight: 1.45,
     },
     answer: { marginTop: 10, borderTop: `1px solid ${t.border}`, paddingTop: 10 },
     answerQ: { fontSize: 10, color: t.faint, letterSpacing: '.04em' },

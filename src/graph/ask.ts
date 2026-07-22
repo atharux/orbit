@@ -119,6 +119,19 @@ export const PRESETS: Preset[] = [
     },
   },
   {
+    id: 'no-website',
+    q: 'Venues with no website',
+    run: g => {
+      const hits = nodesOfKind(g, 'venue').filter(v => !v.website)
+      return {
+        answer: hits.length
+          ? `${hits.length} venue${hits.length === 1 ? '' : 's'} have no website on file — prime targets if you sell websites.`
+          : 'Every venue has a website on file.',
+        nodeIds: hits.map(v => v.id),
+      }
+    },
+  },
+  {
     id: 'targeted-no-contact',
     q: 'Venues targeted by a sequence but with zero contacts',
     run: g => {
@@ -178,4 +191,59 @@ export async function askLive(
   if (WRITE_RE.test(cypher)) throw new Error('Refused: generated query was not read-only.')
   const { summary, nodeIds } = await runReadCypher(cypher)
   return { answer: summary, nodeIds, cypher }
+}
+
+// --- local free-text engine (no Aura) ---------------------------------------
+// Answers over the in-memory graph using just an OpenRouter key. The model gets
+// a compact listing of nodes + edges and returns the ids that answer the
+// question, which we light up. Capped so it stays within a small context.
+
+const LOCAL_CAP = 1500
+
+export function localAvailable(apiKey: string | undefined, g: GraphData | null): boolean {
+  return Boolean(apiKey) && Boolean(g) && (g as GraphData).nodes.length <= LOCAL_CAP
+}
+
+export async function askLocal(
+  question: string,
+  g: GraphData,
+  apiKey: string,
+  model?: string,
+): Promise<AskResult> {
+  if (g.nodes.length > LOCAL_CAP) {
+    throw new Error(`Graph too large for local answering (${g.nodes.length} nodes). Connect Aura for free-text at this scale.`)
+  }
+  const nodeLines = g.nodes.map(n =>
+    `${n.id}\t${n.kind}\t${n.label}${n.verified ? '\t[verified]' : ''}${n.district ? '\t{' + n.district + '}' : ''}${n.kind === 'venue' && !n.website ? '\t[no-website]' : ''}`,
+  )
+  const edgeLines = g.links.map(l => `${l.source} -${l.kind}-> ${l.target}`)
+  const prompt = `You answer a question about a small graph and return the node ids that answer it.
+Node kinds: venue, contact, source, sequence.
+Relationships: (contact)-WORKS_AT->(venue), (contact)-VERIFIED_BY->(source), (contact)-ENROLLED_IN->(sequence), (sequence)-TARGETS->(venue).
+
+NODES (id, kind, label, flags):
+${nodeLines.join('\n')}
+
+EDGES:
+${edgeLines.join('\n')}
+
+Question: ${question}
+
+Return ONLY minified JSON: {"answer":"<one short sentence>","ids":["<exact node id>", ...]}. Use only ids from the NODES list. If nothing matches, return an empty ids array.`
+
+  const { text } = await callOpenRouter({
+    apiKey, model, appTitle: 'Orbit', temperature: 0, maxTokens: 1500,
+    messages: [{ role: 'user', content: prompt }],
+  })
+  let obj: { answer?: string; ids?: string[] }
+  try {
+    const s = text.indexOf('{')
+    const e = text.lastIndexOf('}')
+    obj = JSON.parse(text.slice(s, e + 1))
+  } catch {
+    throw new Error('Could not read the model response. Try rephrasing.')
+  }
+  const known = new Set(g.nodes.map(n => n.id))
+  const nodeIds = (Array.isArray(obj.ids) ? obj.ids : []).filter(id => known.has(id))
+  return { answer: (obj.answer || '').trim() || `${nodeIds.length} matching node${nodeIds.length === 1 ? '' : 's'}`, nodeIds }
 }
