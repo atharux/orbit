@@ -41,6 +41,41 @@ const REL_LABEL: Record<GraphLink['kind'], string> = {
 
 const DIM = '#1f2937'
 
+export type ThemeMode = 'dark' | 'light'
+
+// Light "plate" palette (muted plate inks) — mirrors the About exhibit.
+const KIND_COLOR_LIGHT: Record<GraphNode['kind'], string> = {
+  venue: '#2f7d84', contact: '#6a5aa6', source: '#b5622a', sequence: '#4d7a46',
+}
+const LINK_COLOR_LIGHT: Record<GraphLink['kind'], string> = {
+  WORKS_AT: '#6b6659', VERIFIED_BY: '#b5622a', ENROLLED_IN: '#4d7a46', TARGETS: '#2f7d84',
+}
+const LINK_DIM_LIGHT: Record<GraphLink['kind'], string> = {
+  WORKS_AT: '#c3bba6', VERIFIED_BY: '#d8b48f', ENROLLED_IN: '#a9c2a0', TARGETS: '#9ec6cb',
+}
+
+interface CanvasTheme {
+  bg: string; bloom: number; stars: boolean
+  node: Record<GraphNode['kind'], string>; dim: string
+  linkFull: Record<GraphLink['kind'], string>; linkRest: Record<GraphLink['kind'], string>; linkFade: string
+  labelText: string; labelBg: string; labelBorder: string
+}
+
+// Dark = the original immersive space; light = an engraved cream "plate" (no
+// bloom, ink lines, muted inks).
+const CANVAS: Record<ThemeMode, CanvasTheme> = {
+  dark: {
+    bg: '#05060a', bloom: 0.32, stars: true, node: KIND_COLOR, dim: DIM,
+    linkFull: LINK_COLOR, linkRest: LINK_DIM, linkFade: '#151b26',
+    labelText: '#dfe6f0', labelBg: 'rgba(6,8,13,0.82)', labelBorder: 'rgba(120,132,148,0.18)',
+  },
+  light: {
+    bg: '#efeadd', bloom: 0, stars: false, node: KIND_COLOR_LIGHT, dim: '#cfc7b5',
+    linkFull: LINK_COLOR_LIGHT, linkRest: LINK_DIM_LIGHT, linkFade: '#ddd5c2',
+    labelText: '#201e18', labelBg: 'rgba(246,242,231,0.92)', labelBorder: 'rgba(32,30,24,0.22)',
+  },
+}
+
 // Pipeline stats derived from the graph — the HUD's numbers.
 function computeStats(g: GraphData) {
   const venues = g.nodes.filter(n => n.kind === 'venue')
@@ -85,6 +120,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<any>(null)
+  const [theme, setTheme] = useState<ThemeMode>('dark')
+  const canvasThemeRef = useRef<CanvasTheme>(CANVAS.dark)
+  const styles = makeStyles(theme)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [meta, setMeta] = useState<{ origin: Origin; nodes: number; links: number; note?: string } | null>(null)
   const [liveWarning, setLiveWarning] = useState<string | null>(null)
@@ -135,31 +173,32 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       let focused: GraphNode | null = null
 
       const nodeIsHot = (n: any) => highlightNodes.size === 0 || highlightNodes.has(n.id)
+      // Live canvas theme — read fresh on every accessor call so applyTheme() takes effect.
+      const ct = () => canvasThemeRef.current
 
       const linkRestColor = (l: any) =>
-        highlightLinks.has(l) ? LINK_COLOR[l.kind as GraphLink['kind']]
-          : highlightNodes.size ? '#151b26'
-          : LINK_DIM[l.kind as GraphLink['kind']]
+        highlightLinks.has(l) ? ct().linkFull[l.kind as GraphLink['kind']]
+          : highlightNodes.size ? ct().linkFade
+          : ct().linkRest[l.kind as GraphLink['kind']]
 
       const Graph = new ForceGraph3D(el, { controlType: 'orbit' })
-        .backgroundColor('#05060a')
+        .backgroundColor(ct().bg)
         .graphData(structuredClone(data))
         .nodeRelSize(4)
         .nodeVal((n: any) => (n.kind === 'venue' ? 6 : n.kind === 'sequence' ? 5 : 3))
         .nodeOpacity(1)
-        .nodeColor((n: any) => (nodeIsHot(n) ? KIND_COLOR[n.kind as GraphNode['kind']] : DIM))
+        .nodeColor((n: any) => (nodeIsHot(n) ? ct().node[n.kind as GraphNode['kind']] : ct().dim))
         // Permanent text label on every node — kept alongside the default sphere.
         .nodeThreeObjectExtend(true)
         .nodeThreeObject((n: any) => {
           const kind = n.kind as GraphNode['kind']
           const t = new SpriteText(n.label)
-          t.color = '#dfe6f0'
+          t.color = ct().labelText
           t.fontFace = 'DM Mono, ui-monospace, monospace'
           t.fontWeight = '600'
           t.textHeight = kind === 'venue' || kind === 'sequence' ? 3.4 : 2.4
-          // Solid opaque plate; near-invisible neutral border (no neon frame).
-          t.backgroundColor = 'rgba(6,8,13,0.82)'
-          t.borderColor = 'rgba(120,132,148,0.18)'
+          t.backgroundColor = ct().labelBg
+          t.borderColor = ct().labelBorder
           t.borderWidth = 0.15
           t.borderRadius = 2.5
           t.padding = 2.2
@@ -168,13 +207,13 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         })
         // Hover card carries the detail so the always-on labels stay short.
         .nodeLabel((n: any) => `
-          <div style="font:12px/1.4 'DM Mono',monospace;background:#0b0e14;border:1px solid ${KIND_COLOR[n.kind as GraphNode['kind']]};
-            padding:6px 9px;border-radius:4px;color:#e5e7eb;max-width:220px">
-            <div style="color:${KIND_COLOR[n.kind as GraphNode['kind']]};text-transform:uppercase;letter-spacing:.1em;font-size:9px">
+          <div style="font:12px/1.4 'DM Mono',monospace;background:${ct().labelBg};border:1px solid ${ct().node[n.kind as GraphNode['kind']]};
+            padding:6px 9px;border-radius:4px;color:${ct().labelText};max-width:220px">
+            <div style="color:${ct().node[n.kind as GraphNode['kind']]};text-transform:uppercase;letter-spacing:.1em;font-size:9px">
               ${KIND_LABEL[n.kind as GraphNode['kind']]}${n.verified ? ' · verified' : ''}</div>
             <div style="font-weight:600;margin-top:2px">${n.label}</div>
-            ${n.sub ? `<div style="color:#9ca3af">${n.sub}</div>` : ''}
-            ${n.district ? `<div style="color:#9ca3af">${n.district}</div>` : ''}
+            ${n.sub ? `<div style="opacity:.7">${n.sub}</div>` : ''}
+            ${n.district ? `<div style="opacity:.7">${n.district}</div>` : ''}
           </div>`)
         .linkColor(linkRestColor)
         .linkWidth((l: any) => (highlightLinks.has(l) ? 1.8 : 0.7))
@@ -183,7 +222,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         .linkDirectionalArrowLength(3.4)
         .linkDirectionalArrowRelPos(0.92)
         .linkDirectionalArrowColor(linkRestColor)
-        .linkLabel((l: any) => `<span style="font:10px 'DM Mono',monospace;color:${LINK_COLOR[l.kind as GraphLink['kind']]}">${REL_LABEL[l.kind as GraphLink['kind']]}</span>`)
+        .linkLabel((l: any) => `<span style="font:10px 'DM Mono',monospace;color:${ct().linkFull[l.kind as GraphLink['kind']]}">${REL_LABEL[l.kind as GraphLink['kind']]}</span>`)
         // Particles now only stream on the focused neighbourhood — less noise.
         .linkDirectionalParticles((l: any) => (highlightLinks.has(l) ? 3 : 0))
         .linkDirectionalParticleWidth(1.8)
@@ -194,10 +233,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       // Spread nodes out further so labels don't collide.
       Graph.d3Force('charge')?.strength(-320)
 
-      // Very gentle bloom: nodes still glow softly, but thin label text no
-      // longer smears (low strength + tight radius keeps small bright areas crisp).
+      // Very gentle bloom (dark theme only; light "plate" theme sets it to 0).
       const bloom = new UnrealBloomPass(
-        new THREE.Vector2(el.clientWidth, el.clientHeight), 0.32, 0.28, 0.35,
+        new THREE.Vector2(el.clientWidth, el.clientHeight), ct().bloom, 0.28, 0.35,
       )
       Graph.postProcessingComposer().addPass(bloom)
 
@@ -211,6 +249,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         starGeo,
         new THREE.PointsMaterial({ color: 0x334155, size: 1.4, sizeAttenuation: true }),
       )
+      stars.visible = ct().stars
       Graph.scene().add(stars)
 
       // Gentle cinematic auto-orbit; pauses while a node is focused.
@@ -283,13 +322,26 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         if (node) selectNode(node)
       }
 
+      // Re-skin the live scene when the theme toggles (no rebuild / layout reset).
+      function applyTheme(next: CanvasTheme) {
+        canvasThemeRef.current = next
+        Graph.backgroundColor(next.bg)
+        bloom.strength = next.bloom
+        stars.visible = next.stars
+        Graph.nodeColor(Graph.nodeColor())
+          .nodeThreeObject(Graph.nodeThreeObject()) // rebuild labels with new colours
+          .nodeLabel(Graph.nodeLabel())
+          .linkColor(Graph.linkColor())
+          .linkDirectionalArrowColor(Graph.linkDirectionalArrowColor())
+      }
+
       const onResize = () => Graph.width(el.clientWidth).height(el.clientHeight)
       window.addEventListener('resize', onResize)
 
       // fit once the layout settles
       setTimeout(() => Graph.zoomToFit(1200, 60), 700)
 
-      graphRef.current = { Graph, onResize, focusNodes, selectNodeById }
+      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme }
       void focused
     }
 
@@ -304,6 +356,11 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Re-skin the canvas when the theme flips.
+  useEffect(() => {
+    graphRef.current?.applyTheme?.(CANVAS[theme])
+  }, [theme])
 
   function runPreset(p: typeof PRESETS[number]) {
     if (!graphData) return
@@ -345,6 +402,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
   const stats = graphData ? computeStats(graphData) : null
   const neighbors = graphData && selected ? neighborsOf(graphData, selected.id) : []
+  const nodeCol = CANVAS[theme].node // theme-aware node/relationship colours for the HTML chrome
+  const relCol = CANVAS[theme].linkFull
 
   const originBadge: Record<Origin, { text: string; color: string }> = {
     live: { text: 'LIVE · NEO4J AURA', color: '#34d399' },
@@ -369,6 +428,13 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         )}
         {meta && <div style={styles.counts}>{meta.nodes} nodes · {meta.links} edges</div>}
         <div style={{ flex: 1 }} />
+        <button
+          style={styles.themeBtn}
+          onClick={() => setTheme(m => (m === 'dark' ? 'light' : 'dark'))}
+          title="Toggle light / dark"
+        >
+          {theme === 'dark' ? 'Light plate' : 'Dark space'}
+        </button>
         <button style={styles.closeBtn} onClick={onClose}>Exit graph ✕</button>
       </div>
 
@@ -377,10 +443,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         <div style={styles.stats}>
           <div style={styles.statsHead}>OUTREACH STATE</div>
           <div style={styles.statGrid}>
-            <Stat label="Venues" value={stats.venues} color="#22d3ee" />
-            <Stat label="Contacts" value={stats.contacts} color="#a78bfa" />
-            <Stat label="Verified" value={stats.verified} color="#34d399" />
-            <Stat label="Sources" value={stats.sources} color="#f97316" />
+            <Stat label="Venues" value={stats.venues} color={CANVAS[theme].node.venue} s={styles} />
+            <Stat label="Contacts" value={stats.contacts} color={CANVAS[theme].node.contact} s={styles} />
+            <Stat label="Verified" value={stats.verified} color={CANVAS[theme].node.sequence} s={styles} />
+            <Stat label="Sources" value={stats.sources} color={CANVAS[theme].node.source} s={styles} />
           </div>
           <div style={styles.coverageRow}>
             <span>verified-contact coverage</span>
@@ -410,14 +476,14 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         <div style={styles.legendHead}>NODES · click to spotlight</div>
         {(Object.keys(KIND_COLOR) as GraphNode['kind'][]).map(k => (
           <button key={k} style={styles.legendBtn} onClick={() => spotlightKind(k)} title={`Light up all ${KIND_LABEL[k]} nodes`}>
-            <span style={{ ...styles.legendDot, background: KIND_COLOR[k] }} />
+            <span style={{ ...styles.legendDot, background: nodeCol[k] }} />
             {KIND_LABEL[k]}
           </button>
         ))}
         <div style={{ ...styles.legendHead, marginTop: 8 }}>RELATIONSHIPS</div>
         {(Object.keys(REL_LABEL) as GraphLink['kind'][]).map(k => (
           <div key={k} style={styles.legendRow}>
-            <span style={{ ...styles.legendArrow, color: LINK_COLOR[k] }}>→</span>
+            <span style={{ ...styles.legendArrow, color: relCol[k] }}>→</span>
             {REL_LABEL[k]}
           </div>
         ))}
@@ -471,8 +537,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       {/* Selected node card */}
       {selected && (
-        <div style={{ ...styles.card, borderColor: KIND_COLOR[selected.kind] }}>
-          <div style={{ ...styles.cardKind, color: KIND_COLOR[selected.kind] }}>
+        <div style={{ ...styles.card, borderColor: nodeCol[selected.kind] }}>
+          <div style={{ ...styles.cardKind, color: nodeCol[selected.kind] }}>
             {KIND_LABEL[selected.kind]}{selected.verified ? ' · verified' : ''}
           </div>
           <div style={styles.cardTitle}>{selected.label}</div>
@@ -484,7 +550,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               <div style={styles.connHead}>{neighbors.length} connection{neighbors.length === 1 ? '' : 's'} · click to jump</div>
               {neighbors.map((nb, i) => (
                 <button key={i} style={styles.connRow} onClick={() => graphRef.current?.selectNodeById(nb.id)}>
-                  <span style={{ ...styles.connDot, background: KIND_COLOR[nb.node.kind] }} />
+                  <span style={{ ...styles.connDot, background: nodeCol[nb.node.kind] }} />
                   <span style={styles.connRel}>{nb.dir === 'out' ? REL_LABEL[nb.rel] : `←${REL_LABEL[nb.rel]}`}</span>
                   <span style={styles.connName}>{nb.node.label}</span>
                 </button>
@@ -501,145 +567,167 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   )
 }
 
-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+function Stat({ label, value, color, s }: { label: string; value: number; color: string; s: Styles }) {
   return (
-    <div style={styles.stat}>
-      <div style={{ ...styles.statValue, color }}>{value}</div>
-      <div style={styles.statLabel}>{label}</div>
+    <div style={s.stat}>
+      <div style={{ ...s.statValue, color }}>{value}</div>
+      <div style={s.statLabel}>{label}</div>
     </div>
   )
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  overlay: { position: 'fixed', inset: 0, zIndex: 1000, background: '#05060a', overflow: 'hidden' },
-  canvas: { position: 'absolute', inset: 0 },
-  hudTop: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 52, display: 'flex', alignItems: 'center',
-    gap: 14, padding: '0 20px', zIndex: 2,
-    background: 'linear-gradient(#05060aee, #05060a00)', color: '#e5e7eb',
-    fontFamily: "'DM Mono', monospace",
-  },
-  brand: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, letterSpacing: '.14em', fontWeight: 600 },
-  brandDot: { width: 8, height: 8, borderRadius: '50%', background: '#22d3ee', boxShadow: '0 0 12px #22d3ee' },
-  brandSub: { fontSize: 10, color: '#64748b', letterSpacing: '.1em', marginLeft: 4 },
-  badge: { fontSize: 10, letterSpacing: '.14em', border: '1px solid', borderRadius: 3, padding: '3px 8px' },
-  counts: { fontSize: 11, color: '#64748b' },
-  closeBtn: {
-    fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#e5e7eb', background: '#111826',
-    border: '1px solid #1f2937', borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
-  },
-  warn: {
-    position: 'absolute', top: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 3,
-    background: '#3b1d0e', border: '1px solid #f97316', color: '#fdba74', fontFamily: "'DM Mono', monospace",
-    fontSize: 11, padding: '6px 12px', borderRadius: 4, maxWidth: '80%', textAlign: 'center',
-  },
-  sampleNote: {
-    position: 'absolute', top: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 3,
-    color: '#f97316', fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: '.05em',
-  },
-  center: {
-    position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color: '#64748b', fontFamily: "'DM Mono', monospace", fontSize: 13, zIndex: 2, pointerEvents: 'none',
-  },
-  ask: {
-    position: 'absolute', left: 20, top: 64, zIndex: 3, width: 300,
-    maxHeight: 'calc(100vh - 200px)', overflowY: 'auto',
-    background: '#0b0e14e6', border: '1px solid #1f2937', borderRadius: 8, padding: 14,
-    fontFamily: "'DM Mono', monospace", color: '#e5e7eb',
-    boxShadow: '0 10px 40px #0008',
-  },
-  askHead: { fontSize: 11, letterSpacing: '.14em', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  askLive: { fontSize: 10, letterSpacing: '.06em' },
-  askRow: { display: 'flex', gap: 6, marginTop: 10 },
-  askInput: {
-    flex: 1, background: '#05060a', border: '1px solid #1f2937', borderRadius: 4,
-    padding: '7px 9px', color: '#e5e7eb', fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
-  },
-  askBtn: {
-    width: 34, background: '#111826', border: '1px solid #22d3ee55', borderRadius: 4,
-    color: '#22d3ee', cursor: 'pointer', fontSize: 14,
-  },
-  presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10 },
-  presetChip: {
-    textAlign: 'left', background: '#111826', border: '1px solid #1f2937', borderRadius: 4,
-    padding: '7px 9px', color: '#cbd5e1', cursor: 'pointer', fontSize: 11, lineHeight: 1.35,
-    fontFamily: "'DM Mono', monospace",
-  },
-  askErr: {
-    marginTop: 10, background: '#3b1d0e', border: '1px solid #f97316', color: '#fdba74',
-    fontSize: 11, padding: '7px 9px', borderRadius: 4, lineHeight: 1.4,
-  },
-  answer: {
-    marginTop: 10, borderTop: '1px solid #1f2937', paddingTop: 10,
-  },
-  answerQ: { fontSize: 10, color: '#64748b', letterSpacing: '.04em' },
-  answerA: { fontSize: 12.5, color: '#e5e7eb', marginTop: 4, lineHeight: 1.5 },
-  cypher: {
-    marginTop: 8, background: '#05060a', border: '1px solid #1f2937', borderRadius: 4,
-    padding: '8px 9px', color: '#67e8f9', fontSize: 10.5, lineHeight: 1.45,
-    whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflowY: 'auto',
-  },
-  clearBtn: {
-    marginTop: 8, background: 'transparent', border: '1px solid #1f2937', borderRadius: 4,
-    color: '#94a3b8', cursor: 'pointer', fontSize: 10, padding: '4px 10px', fontFamily: "'DM Mono', monospace",
-  },
-  legend: {
-    position: 'absolute', left: 20, bottom: 20, zIndex: 2, display: 'flex', flexDirection: 'column', gap: 6,
-    background: '#0b0e14cc', border: '1px solid #1f2937', borderRadius: 6, padding: '10px 12px',
-    fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#cbd5e1',
-  },
-  legendHead: { fontSize: 9, letterSpacing: '.16em', color: '#64748b' },
-  legendRow: { display: 'flex', alignItems: 'center', gap: 8 },
-  legendBtn: {
-    display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none',
-    color: '#cbd5e1', cursor: 'pointer', fontFamily: "'DM Mono', monospace", fontSize: 11,
-    padding: '1px 0', textAlign: 'left',
-  },
-  legendDot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
-  legendArrow: { width: 9, textAlign: 'center', fontWeight: 700, display: 'inline-block' },
+type Styles = Record<string, React.CSSProperties>
 
-  // Pipeline stats HUD
-  stats: {
-    position: 'absolute', right: 20, top: 64, zIndex: 3, width: 230,
-    background: '#0b0e14e6', border: '1px solid #1f2937', borderRadius: 8, padding: 14,
-    fontFamily: "'DM Mono', monospace", color: '#e5e7eb', boxShadow: '0 10px 40px #0008',
-  },
-  statsHead: { fontSize: 10, letterSpacing: '.16em', color: '#94a3b8', marginBottom: 10 },
-  statGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
-  stat: { background: '#05060a', border: '1px solid #141a24', borderRadius: 5, padding: '8px 10px' },
-  statValue: { fontSize: 20, fontWeight: 700, lineHeight: 1 },
-  statLabel: { fontSize: 9, letterSpacing: '.08em', color: '#64748b', marginTop: 3, textTransform: 'uppercase' },
-  coverageRow: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8', marginTop: 12 },
-  coverageBar: { height: 5, background: '#141a24', borderRadius: 3, marginTop: 5, overflow: 'hidden' },
-  coverageFill: { height: '100%', background: 'linear-gradient(90deg,#22d3ee,#34d399)', borderRadius: 3 },
-  statAction: {
-    marginTop: 10, width: '100%', textAlign: 'left', background: '#111826', border: '1px solid #f9731644',
-    borderRadius: 4, color: '#fdba74', cursor: 'pointer', fontSize: 10.5, padding: '7px 9px',
-    fontFamily: "'DM Mono', monospace", lineHeight: 1.35,
-  },
+// Panel (HTML chrome) tokens per theme. Dark values reproduce the original look
+// exactly; light values are the cream "plate" palette from the About exhibit.
+function panelTokens(mode: ThemeMode) {
+  return mode === 'dark'
+    ? {
+      overlayBg: '#05060a', bg: '#0b0e14e6', card: '#0b0e14f2', legend: '#0b0e14cc',
+      solid: '#05060a', btn: '#111826', border: '#1f2937', border2: '#141a24',
+      text: '#e5e7eb', text2: '#cbd5e1', muted: '#94a3b8', faint: '#64748b', faint2: '#475569',
+      cardSub: '#9ca3af', topGrad: 'linear-gradient(#05060aee, #05060a00)', shadow: '0 10px 40px #0008',
+      accent: '#22d3ee', accentDim: '#22d3ee55', cypher: '#67e8f9', brandGlow: '0 0 12px #22d3ee',
+    }
+    : {
+      overlayBg: '#efeadd', bg: '#f6f2e7f2', card: '#f6f2e7f7', legend: '#f6f2e7ee',
+      solid: '#efeadd', btn: '#efe9db', border: '#c3bba6', border2: '#ddd5c2',
+      text: '#201e18', text2: '#3a362e', muted: '#6b6659', faint: '#8b8677', faint2: '#a89f89',
+      cardSub: '#6b6659', topGrad: 'linear-gradient(#efeaddee, #efeadd00)', shadow: '4px 4px 0 rgba(32,30,24,.10)',
+      accent: '#2f7d84', accentDim: '#2f7d8455', cypher: '#2f6d74', brandGlow: 'none',
+    }
+}
 
-  card: {
-    position: 'absolute', right: 20, bottom: 20, zIndex: 2, width: 248,
-    maxHeight: 'calc(100vh - 320px)', overflowY: 'auto',
-    background: '#0b0e14f2', border: '1px solid', borderRadius: 8, padding: '14px 16px',
-    fontFamily: "'DM Mono', monospace", color: '#e5e7eb',
-  },
-  connections: { marginTop: 12, borderTop: '1px solid #1f2937', paddingTop: 10 },
-  connHead: { fontSize: 9, letterSpacing: '.1em', color: '#64748b', marginBottom: 6 },
-  connRow: {
-    display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left',
-    background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0',
-    fontFamily: "'DM Mono', monospace", color: '#cbd5e1', fontSize: 11,
-  },
-  connDot: { width: 7, height: 7, borderRadius: '50%', flexShrink: 0 },
-  connRel: { color: '#64748b', fontSize: 10, minWidth: 66, flexShrink: 0 },
-  connName: { color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  cardKind: { fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase' },
-  cardTitle: { fontSize: 15, fontWeight: 600, margin: '4px 0 2px' },
-  cardSub: { fontSize: 12, color: '#9ca3af' },
-  cardHint: { fontSize: 10, color: '#475569', marginTop: 10 },
-  hint: {
-    position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 2,
-    color: '#475569', fontFamily: "'DM Mono', monospace", fontSize: 11, pointerEvents: 'none',
-  },
+function makeStyles(mode: ThemeMode): Styles {
+  const t = panelTokens(mode)
+  const mono = "'DM Mono', monospace"
+  return {
+    overlay: { position: 'fixed', inset: 0, zIndex: 1000, background: t.overlayBg, overflow: 'hidden' },
+    canvas: { position: 'absolute', inset: 0 },
+    hudTop: {
+      position: 'absolute', top: 0, left: 0, right: 0, height: 52, display: 'flex', alignItems: 'center',
+      gap: 14, padding: '0 20px', zIndex: 2, background: t.topGrad, color: t.text, fontFamily: mono,
+    },
+    brand: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, letterSpacing: '.14em', fontWeight: 600 },
+    brandDot: { width: 8, height: 8, borderRadius: '50%', background: t.accent, boxShadow: t.brandGlow },
+    brandSub: { fontSize: 10, color: t.faint, letterSpacing: '.1em', marginLeft: 4 },
+    badge: { fontSize: 10, letterSpacing: '.14em', border: '1px solid', borderRadius: 3, padding: '3px 8px' },
+    counts: { fontSize: 11, color: t.faint },
+    closeBtn: {
+      fontFamily: mono, fontSize: 11, color: t.text, background: t.btn,
+      border: `1px solid ${t.border}`, borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+    },
+    warn: {
+      position: 'absolute', top: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 3,
+      background: '#3b1d0e', border: '1px solid #f97316', color: '#fdba74', fontFamily: mono,
+      fontSize: 11, padding: '6px 12px', borderRadius: 4, maxWidth: '80%', textAlign: 'center',
+    },
+    sampleNote: {
+      position: 'absolute', top: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 3,
+      color: '#f97316', fontFamily: mono, fontSize: 10, letterSpacing: '.05em',
+    },
+    center: {
+      position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: t.faint, fontFamily: mono, fontSize: 13, zIndex: 2, pointerEvents: 'none',
+    },
+    ask: {
+      position: 'absolute', left: 20, top: 64, zIndex: 3, width: 300,
+      maxHeight: 'calc(100vh - 200px)', overflowY: 'auto',
+      background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8, padding: 14,
+      fontFamily: mono, color: t.text, boxShadow: t.shadow,
+    },
+    askHead: { fontSize: 11, letterSpacing: '.14em', color: t.muted, display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+    askLive: { fontSize: 10, letterSpacing: '.06em' },
+    askRow: { display: 'flex', gap: 6, marginTop: 10 },
+    askInput: {
+      flex: 1, background: t.solid, border: `1px solid ${t.border}`, borderRadius: 4,
+      padding: '7px 9px', color: t.text, fontFamily: mono, fontSize: 12, outline: 'none',
+    },
+    askBtn: {
+      width: 34, background: t.btn, border: `1px solid ${t.accentDim}`, borderRadius: 4,
+      color: t.accent, cursor: 'pointer', fontSize: 14,
+    },
+    presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10 },
+    presetChip: {
+      textAlign: 'left', background: t.btn, border: `1px solid ${t.border}`, borderRadius: 4,
+      padding: '7px 9px', color: t.text2, cursor: 'pointer', fontSize: 11, lineHeight: 1.35, fontFamily: mono,
+    },
+    askErr: {
+      marginTop: 10, background: '#3b1d0e', border: '1px solid #f97316', color: '#fdba74',
+      fontSize: 11, padding: '7px 9px', borderRadius: 4, lineHeight: 1.4,
+    },
+    answer: { marginTop: 10, borderTop: `1px solid ${t.border}`, paddingTop: 10 },
+    answerQ: { fontSize: 10, color: t.faint, letterSpacing: '.04em' },
+    answerA: { fontSize: 12.5, color: t.text, marginTop: 4, lineHeight: 1.5 },
+    cypher: {
+      marginTop: 8, background: t.solid, border: `1px solid ${t.border}`, borderRadius: 4,
+      padding: '8px 9px', color: t.cypher, fontSize: 10.5, lineHeight: 1.45,
+      whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflowY: 'auto',
+    },
+    clearBtn: {
+      marginTop: 8, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4,
+      color: t.muted, cursor: 'pointer', fontSize: 10, padding: '4px 10px', fontFamily: mono,
+    },
+    legend: {
+      position: 'absolute', left: 20, bottom: 20, zIndex: 2, display: 'flex', flexDirection: 'column', gap: 6,
+      background: t.legend, border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 12px',
+      fontFamily: mono, fontSize: 11, color: t.text2,
+    },
+    legendHead: { fontSize: 9, letterSpacing: '.16em', color: t.faint },
+    legendRow: { display: 'flex', alignItems: 'center', gap: 8 },
+    legendBtn: {
+      display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none',
+      color: t.text2, cursor: 'pointer', fontFamily: mono, fontSize: 11, padding: '1px 0', textAlign: 'left',
+    },
+    legendDot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
+    legendArrow: { width: 9, textAlign: 'center', fontWeight: 700, display: 'inline-block' },
+
+    stats: {
+      position: 'absolute', right: 20, top: 64, zIndex: 3, width: 230,
+      background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8, padding: 14,
+      fontFamily: mono, color: t.text, boxShadow: t.shadow,
+    },
+    statsHead: { fontSize: 10, letterSpacing: '.16em', color: t.muted, marginBottom: 10 },
+    statGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
+    stat: { background: t.solid, border: `1px solid ${t.border2}`, borderRadius: 5, padding: '8px 10px' },
+    statValue: { fontSize: 20, fontWeight: 700, lineHeight: 1 },
+    statLabel: { fontSize: 9, letterSpacing: '.08em', color: t.faint, marginTop: 3, textTransform: 'uppercase' },
+    coverageRow: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: t.muted, marginTop: 12 },
+    coverageBar: { height: 5, background: t.border2, borderRadius: 3, marginTop: 5, overflow: 'hidden' },
+    coverageFill: { height: '100%', background: mode === 'dark' ? 'linear-gradient(90deg,#22d3ee,#34d399)' : 'linear-gradient(90deg,#2f7d84,#4d7a46)', borderRadius: 3 },
+    statAction: {
+      marginTop: 10, width: '100%', textAlign: 'left', background: t.btn, border: '1px solid #f9731644',
+      borderRadius: 4, color: mode === 'dark' ? '#fdba74' : '#b5622a', cursor: 'pointer', fontSize: 10.5,
+      padding: '7px 9px', fontFamily: mono, lineHeight: 1.35,
+    },
+
+    card: {
+      position: 'absolute', right: 20, bottom: 20, zIndex: 2, width: 248,
+      maxHeight: 'calc(100vh - 320px)', overflowY: 'auto',
+      background: t.card, border: '1px solid', borderRadius: 8, padding: '14px 16px',
+      fontFamily: mono, color: t.text,
+    },
+    connections: { marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 10 },
+    connHead: { fontSize: 9, letterSpacing: '.1em', color: t.faint, marginBottom: 6 },
+    connRow: {
+      display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left',
+      background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0',
+      fontFamily: mono, color: t.text2, fontSize: 11,
+    },
+    connDot: { width: 7, height: 7, borderRadius: '50%', flexShrink: 0 },
+    connRel: { color: t.faint, fontSize: 10, minWidth: 66, flexShrink: 0 },
+    connName: { color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+    cardKind: { fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase' },
+    cardTitle: { fontSize: 15, fontWeight: 600, margin: '4px 0 2px' },
+    cardSub: { fontSize: 12, color: t.cardSub },
+    cardHint: { fontSize: 10, color: t.faint2, marginTop: 10 },
+    hint: {
+      position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 2,
+      color: t.faint2, fontFamily: mono, fontSize: 11, pointerEvents: 'none',
+    },
+    themeBtn: {
+      fontFamily: mono, fontSize: 11, color: t.text, background: t.btn,
+      border: `1px solid ${t.border}`, borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+    },
+  }
 }
