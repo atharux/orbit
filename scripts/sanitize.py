@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-sanitize.py — strip PII from raw Hydrat3 exports before anything is loaded.
+sanitize.py — strip PII from raw exports before anything is loaded.
 
     data/raw/*.csv  →  data/sanitized/*.csv
 
@@ -152,7 +152,7 @@ def main() -> None:
     raw_dir, out_dir = Path(args.raw), Path(args.out)
     csvs = sorted(raw_dir.glob("*.csv"))
     if not csvs:
-        sys.exit(f"No CSVs found in {raw_dir}. Put raw Hydrat3 exports there first.")
+        sys.exit(f"No CSVs found in {raw_dir}. Put raw exports there first.")
 
     print(f"Sanitizing {len(csvs)} file(s): {raw_dir} → {out_dir}\n")
     for src in csvs:

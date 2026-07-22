@@ -3,7 +3,7 @@
 **Project code:** VOD (existing)
 **Goal:** Rebuild the venue-outreach-db pipeline as a small Neo4j-powered AI app for the hackathon demo.
 **Centerpiece:** GraphRAG via Neo4j Aura + Aura MCP + Aura Agent
-**Data:** Sanitized real Hydrat3 venue/contact data
+**Data:** Sanitized real venue/contact data
 **Timeline:** 3 working days + 1 buffer day
 
 Hand this file to Claude Code CLI as the working brief. Each phase below is scoped so CLI can execute it as a discrete, verifiable unit — confirm scope before starting a phase, stop and ask if data sanitization rules are unclear.
@@ -28,7 +28,7 @@ vod-graphrag/
 ├── .env.example
 ├── README.md
 ├── data/
-│   ├── raw/              # gitignored — original Hydrat3 exports
+│   ├── raw/              # gitignored — original exports
 │   └── sanitized/        # gitignored — cleaned CSVs, safe to load
 ├── scripts/
 │   ├── sanitize.py       # strips PII, keeps structural fields
@@ -52,7 +52,7 @@ Strip or hash before anything leaves `data/raw/`:
 - Personal emails/phones → keep domain only (e.g. `@venuename.com`) or hash
 - Full names → keep role/title only, or first-name + last-initial
 - Exact addresses → keep neighborhood/district level only
-- Any internal Hydrat3 notes or pricing → remove entirely
+- Any internal notes or pricing → remove entirely
 
 `scripts/sanitize.py` should take `data/raw/*.csv` → `data/sanitized/*.csv` and log what was stripped per row, so the transformation is auditable.
 

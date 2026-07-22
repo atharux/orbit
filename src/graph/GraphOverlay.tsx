@@ -41,6 +41,42 @@ const REL_LABEL: Record<GraphLink['kind'], string> = {
 
 const DIM = '#1f2937'
 
+// Pipeline stats derived from the graph — the HUD's numbers.
+function computeStats(g: GraphData) {
+  const venues = g.nodes.filter(n => n.kind === 'venue')
+  const contacts = g.nodes.filter(n => n.kind === 'contact')
+  const verified = contacts.filter(c => c.verified)
+  const verifiedIds = new Set(verified.map(c => c.id))
+  const covered = new Set(
+    g.links.filter(l => l.kind === 'WORKS_AT' && verifiedIds.has(l.source)).map(l => l.target),
+  )
+  return {
+    venues: venues.length,
+    contacts: contacts.length,
+    verified: verified.length,
+    sources: g.nodes.filter(n => n.kind === 'source').length,
+    sequences: g.nodes.filter(n => n.kind === 'sequence').length,
+    coverage: venues.length ? Math.round((covered.size / venues.length) * 100) : 0,
+    uncovered: venues.length - covered.size,
+  }
+}
+
+interface Neighbor { id: string; rel: GraphLink['kind']; dir: 'in' | 'out'; node: GraphNode }
+
+function neighborsOf(g: GraphData, id: string): Neighbor[] {
+  const out: Neighbor[] = []
+  for (const l of g.links) {
+    if (l.source === id) {
+      const node = g.nodes.find(n => n.id === l.target)
+      if (node) out.push({ id: l.target, rel: l.kind, dir: 'out', node })
+    } else if (l.target === id) {
+      const node = g.nodes.find(n => n.id === l.source)
+      if (node) out.push({ id: l.source, rel: l.kind, dir: 'in', node })
+    }
+  }
+  return out
+}
+
 export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel }: {
   leads: Lead[]
   onClose: () => void
@@ -121,10 +157,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           t.fontFace = 'DM Mono, ui-monospace, monospace'
           t.fontWeight = '600'
           t.textHeight = kind === 'venue' || kind === 'sequence' ? 3.4 : 2.4
-          // Solid opaque plate + border frames the text so it reads over any node.
-          t.backgroundColor = 'rgba(6,8,13,0.92)'
-          t.borderColor = KIND_COLOR[kind]
-          t.borderWidth = 0.4
+          // Solid opaque plate; near-invisible neutral border (no neon frame).
+          t.backgroundColor = 'rgba(6,8,13,0.82)'
+          t.borderColor = 'rgba(120,132,148,0.18)'
+          t.borderWidth = 0.15
           t.borderRadius = 2.5
           t.padding = 2.2
           t.position.set(0, kind === 'venue' ? 11 : kind === 'sequence' ? 10 : 8, 0)
@@ -190,7 +226,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           .linkDirectionalParticles(Graph.linkDirectionalParticles())
       }
 
-      Graph.onNodeClick((node: any) => {
+      function selectNode(node: any) {
         focused = node
         controls.autoRotate = false
         highlightNodes.clear()
@@ -211,7 +247,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         const dist = 120
         const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1)
         Graph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, 1400)
-      })
+      }
+
+      Graph.onNodeClick(selectNode)
 
       Graph.onBackgroundClick(() => {
         focused = null
@@ -239,13 +277,19 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         Graph.zoomToFit(1400, 90, (n: any) => highlightNodes.has(n.id))
       }
 
+      // Select a node by id (used by the connections list to navigate).
+      function selectNodeById(id: string) {
+        const node = (Graph.graphData().nodes as any[]).find(n => n.id === id)
+        if (node) selectNode(node)
+      }
+
       const onResize = () => Graph.width(el.clientWidth).height(el.clientHeight)
       window.addEventListener('resize', onResize)
 
       // fit once the layout settles
       setTimeout(() => Graph.zoomToFit(1200, 60), 700)
 
-      graphRef.current = { Graph, onResize, focusNodes }
+      graphRef.current = { Graph, onResize, focusNodes, selectNodeById }
       void focused
     }
 
@@ -293,6 +337,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     graphRef.current?.focusNodes([])
   }
 
+  // Legend action: light up every node of a kind.
+  function spotlightKind(kind: GraphNode['kind']) {
+    if (!graphData) return
+    graphRef.current?.focusNodes(graphData.nodes.filter(n => n.kind === kind).map(n => n.id))
+  }
+
+  const stats = graphData ? computeStats(graphData) : null
+  const neighbors = graphData && selected ? neighborsOf(graphData, selected.id) : []
+
   const originBadge: Record<Origin, { text: string; color: string }> = {
     live: { text: 'LIVE · NEO4J AURA', color: '#34d399' },
     leads: { text: 'YOUR LEADS', color: '#22d3ee' },
@@ -319,6 +372,33 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         <button style={styles.closeBtn} onClick={onClose}>Exit graph ✕</button>
       </div>
 
+      {/* Pipeline stats HUD */}
+      {stats && status === 'ready' && (
+        <div style={styles.stats}>
+          <div style={styles.statsHead}>OUTREACH STATE</div>
+          <div style={styles.statGrid}>
+            <Stat label="Venues" value={stats.venues} color="#22d3ee" />
+            <Stat label="Contacts" value={stats.contacts} color="#a78bfa" />
+            <Stat label="Verified" value={stats.verified} color="#34d399" />
+            <Stat label="Sources" value={stats.sources} color="#f97316" />
+          </div>
+          <div style={styles.coverageRow}>
+            <span>verified-contact coverage</span>
+            <span style={{ color: stats.coverage >= 60 ? '#34d399' : stats.coverage >= 30 ? '#f97316' : '#EF4444' }}>
+              {stats.coverage}%
+            </span>
+          </div>
+          <div style={styles.coverageBar}>
+            <div style={{ ...styles.coverageFill, width: `${stats.coverage}%` }} />
+          </div>
+          {stats.uncovered > 0 && (
+            <button style={styles.statAction} onClick={() => runPreset(PRESETS[1])}>
+              {stats.uncovered} venue{stats.uncovered === 1 ? '' : 's'} with no verified contact →
+            </button>
+          )}
+        </div>
+      )}
+
       {liveWarning && <div style={styles.warn}>{liveWarning}</div>}
       {meta?.origin === 'sample' && <div style={styles.sampleNote}>{meta.note}</div>}
 
@@ -327,12 +407,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       {/* Legend — nodes (dots) + relationships (arrows) */}
       <div style={styles.legend}>
-        <div style={styles.legendHead}>NODES</div>
+        <div style={styles.legendHead}>NODES · click to spotlight</div>
         {(Object.keys(KIND_COLOR) as GraphNode['kind'][]).map(k => (
-          <div key={k} style={styles.legendRow}>
+          <button key={k} style={styles.legendBtn} onClick={() => spotlightKind(k)} title={`Light up all ${KIND_LABEL[k]} nodes`}>
             <span style={{ ...styles.legendDot, background: KIND_COLOR[k] }} />
             {KIND_LABEL[k]}
-          </div>
+          </button>
         ))}
         <div style={{ ...styles.legendHead, marginTop: 8 }}>RELATIONSHIPS</div>
         {(Object.keys(REL_LABEL) as GraphLink['kind'][]).map(k => (
@@ -398,11 +478,34 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           <div style={styles.cardTitle}>{selected.label}</div>
           {selected.sub && <div style={styles.cardSub}>{selected.sub}</div>}
           {selected.district && <div style={styles.cardSub}>{selected.district}</div>}
+
+          {neighbors.length > 0 && (
+            <div style={styles.connections}>
+              <div style={styles.connHead}>{neighbors.length} connection{neighbors.length === 1 ? '' : 's'} · click to jump</div>
+              {neighbors.map((nb, i) => (
+                <button key={i} style={styles.connRow} onClick={() => graphRef.current?.selectNodeById(nb.id)}>
+                  <span style={{ ...styles.connDot, background: KIND_COLOR[nb.node.kind] }} />
+                  <span style={styles.connRel}>{nb.dir === 'out' ? REL_LABEL[nb.rel] : `←${REL_LABEL[nb.rel]}`}</span>
+                  <span style={styles.connName}>{nb.node.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <div style={styles.cardHint}>neighbors highlighted · click empty space to release</div>
         </div>
       )}
 
       <div style={styles.hint}>drag to orbit · scroll to zoom · click a node to fly in</div>
+    </div>
+  )
+}
+
+function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div style={styles.stat}>
+      <div style={{ ...styles.statValue, color }}>{value}</div>
+      <div style={styles.statLabel}>{label}</div>
     </div>
   )
 }
@@ -487,13 +590,50 @@ const styles: Record<string, React.CSSProperties> = {
   },
   legendHead: { fontSize: 9, letterSpacing: '.16em', color: '#64748b' },
   legendRow: { display: 'flex', alignItems: 'center', gap: 8 },
-  legendDot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block' },
+  legendBtn: {
+    display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none',
+    color: '#cbd5e1', cursor: 'pointer', fontFamily: "'DM Mono', monospace", fontSize: 11,
+    padding: '1px 0', textAlign: 'left',
+  },
+  legendDot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
   legendArrow: { width: 9, textAlign: 'center', fontWeight: 700, display: 'inline-block' },
+
+  // Pipeline stats HUD
+  stats: {
+    position: 'absolute', right: 20, top: 64, zIndex: 3, width: 230,
+    background: '#0b0e14e6', border: '1px solid #1f2937', borderRadius: 8, padding: 14,
+    fontFamily: "'DM Mono', monospace", color: '#e5e7eb', boxShadow: '0 10px 40px #0008',
+  },
+  statsHead: { fontSize: 10, letterSpacing: '.16em', color: '#94a3b8', marginBottom: 10 },
+  statGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
+  stat: { background: '#05060a', border: '1px solid #141a24', borderRadius: 5, padding: '8px 10px' },
+  statValue: { fontSize: 20, fontWeight: 700, lineHeight: 1 },
+  statLabel: { fontSize: 9, letterSpacing: '.08em', color: '#64748b', marginTop: 3, textTransform: 'uppercase' },
+  coverageRow: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8', marginTop: 12 },
+  coverageBar: { height: 5, background: '#141a24', borderRadius: 3, marginTop: 5, overflow: 'hidden' },
+  coverageFill: { height: '100%', background: 'linear-gradient(90deg,#22d3ee,#34d399)', borderRadius: 3 },
+  statAction: {
+    marginTop: 10, width: '100%', textAlign: 'left', background: '#111826', border: '1px solid #f9731644',
+    borderRadius: 4, color: '#fdba74', cursor: 'pointer', fontSize: 10.5, padding: '7px 9px',
+    fontFamily: "'DM Mono', monospace", lineHeight: 1.35,
+  },
+
   card: {
-    position: 'absolute', right: 20, bottom: 20, zIndex: 2, width: 240,
-    background: '#0b0e14ee', border: '1px solid', borderRadius: 8, padding: '14px 16px',
+    position: 'absolute', right: 20, bottom: 20, zIndex: 2, width: 248,
+    maxHeight: 'calc(100vh - 320px)', overflowY: 'auto',
+    background: '#0b0e14f2', border: '1px solid', borderRadius: 8, padding: '14px 16px',
     fontFamily: "'DM Mono', monospace", color: '#e5e7eb',
   },
+  connections: { marginTop: 12, borderTop: '1px solid #1f2937', paddingTop: 10 },
+  connHead: { fontSize: 9, letterSpacing: '.1em', color: '#64748b', marginBottom: 6 },
+  connRow: {
+    display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left',
+    background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0',
+    fontFamily: "'DM Mono', monospace", color: '#cbd5e1', fontSize: 11,
+  },
+  connDot: { width: 7, height: 7, borderRadius: '50%', flexShrink: 0 },
+  connRel: { color: '#64748b', fontSize: 10, minWidth: 66, flexShrink: 0 },
+  connName: { color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   cardKind: { fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase' },
   cardTitle: { fontSize: 15, fontWeight: 600, margin: '4px 0 2px' },
   cardSub: { fontSize: 12, color: '#9ca3af' },

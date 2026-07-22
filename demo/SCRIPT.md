@@ -23,7 +23,7 @@ one question."
 
 ## 2. Data (45s)
 
-- Real Hydrat3 venue + contact data, **sanitized** first — emails reduced to
+- Real venue + contact data, **sanitized** first — emails reduced to
   domains, names to first-name + last-initial, addresses to district, internal
   notes and pricing stripped. Show `scripts/sanitize.py` and the per-row log.
 - Loaded into Neo4j Aura: `Venue`, `Contact`, `Source`, `Sequence` nodes;

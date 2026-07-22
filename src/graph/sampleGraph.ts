@@ -1,6 +1,6 @@
 import type { GraphData, GraphNode, GraphLink } from './types'
 
-// SYNTHETIC demo data — NOT real Hydrat3 venues or contacts. Used only when
+// SYNTHETIC demo data — NOT real venues or contacts. Used only when
 // there are no live/local leads to draw, so the immersive scene has something
 // to render on first open. The HUD badges this as "SAMPLE" so it is never
 // mistaken for real data.
@@ -57,6 +57,6 @@ export function sampleGraph(): GraphData {
     nodes: [...nodes.values()],
     links,
     origin: 'sample',
-    note: 'SAMPLE — synthetic demo data, not real Hydrat3 records',
+    note: 'SAMPLE — synthetic demo data, not real records',
   }
 }

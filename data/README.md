@@ -1,6 +1,6 @@
 # Data folder
 
-`raw/` and `sanitized/` contents are **gitignored** — no Hydrat3 data (raw or
+`raw/` and `sanitized/` contents are **gitignored** — no data (raw or
 sanitized) is ever committed. This file documents the CSV shapes the pipeline
 expects so you can drop exports into `raw/` and run `scripts/sanitize.py`.
 

@@ -12,7 +12,7 @@ up the graph — hence *Orbit*.
 
 ```
 data/
-  raw/          # gitignored — original Hydrat3 exports
+  raw/          # gitignored — original exports
   sanitized/    # gitignored — cleaned CSVs, safe to load
   README.md     # expected CSV columns
 scripts/
@@ -33,7 +33,7 @@ demo/
 
 1. `cp .env.example .env` and fill `NEO4J_URI` / `NEO4J_USERNAME` /
    `NEO4J_PASSWORD` (and `OPENAI_API_KEY` if used). Never commit `.env`.
-2. Put raw Hydrat3 CSVs in `data/raw/`.
+2. Put raw CSVs in `data/raw/`.
 3. `pip install -r scripts/requirements.txt`
 4. `python scripts/sanitize.py` — review the per-row strip log and
    `data/sanitized/`.
