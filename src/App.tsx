@@ -14,6 +14,7 @@ import { SettingsModal } from './components/SettingsModal'
 
 // Heavy (Three.js) — only pulled in when the graph view is opened.
 const GraphOverlay = lazy(() => import('./graph/GraphOverlay').then(m => ({ default: m.GraphOverlay })))
+const AboutExhibit = lazy(() => import('./about/AboutExhibit').then(m => ({ default: m.AboutExhibit })))
 
 // Cheap env check — the actual sync module (pulls neo4j-driver) is lazy-loaded.
 const SYNC_ENABLED = Boolean(
@@ -30,6 +31,7 @@ export function App() {
   const [editingVertical, setEditingVertical] = useState<Vertical | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
   const [graphSync, setGraphSync] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle')
   const syncEnabled = SYNC_ENABLED
   const [settings, setSettings] = useState<AppSettings>(loadSettings)
@@ -291,6 +293,14 @@ export function App() {
         <button
           className="btn btn-ghost"
           style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
+          onClick={() => setAboutOpen(true)}
+          title="How Orbit works — the interactive exhibit"
+        >
+          About
+        </button>
+        <button
+          className="btn btn-ghost"
+          style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
           onClick={() => setGraphOpen(true)}
           title="Open the immersive graph view"
         >
@@ -501,6 +511,12 @@ export function App() {
             openRouterApiKey={settings.openRouterApiKey || undefined}
             openRouterModel={settings.openRouterModel !== 'auto' ? settings.openRouterModel : undefined}
           />
+        </Suspense>
+      )}
+
+      {aboutOpen && (
+        <Suspense fallback={null}>
+          <AboutExhibit onClose={() => setAboutOpen(false)} />
         </Suspense>
       )}
     </div>
