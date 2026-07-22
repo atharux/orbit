@@ -51,6 +51,10 @@ export function AboutExhibit({ onClose }: { onClose: () => void }) {
             it is a single question. Orbit renders your leads as a living specimen you can examine,
             interrogate in plain language, and cultivate as you work.
           </p>
+          <p className="ax-hero-point">
+            The point: it surfaces the high-value contacts you haven't reached yet — the leads a
+            spreadsheet quietly loses.
+          </p>
           <div className="ax-hero-rule" />
           <div className="ax-hero-meta">Plates I – V · circa two minutes</div>
         </section>
@@ -306,6 +310,7 @@ const CSS = `
 .ax-hero-title { font-family: var(--disp, system-ui); font-weight: 600; font-size: 50px; line-height: 1.1;
   letter-spacing: -0.02em; color: ${INK}; margin: 18px 0 26px; }
 .ax-hero-lead { font-family: var(--disp, system-ui); font-size: 18px; line-height: 1.68; color: #47433a; max-width: 640px; }
+.ax-hero-point { font-family: var(--disp, system-ui); font-size: 16px; line-height: 1.6; color: ${INK}; max-width: 620px; margin-top: 20px; padding-left: 16px; border-left: 2px solid ${TEAL}; }
 .ax-hero-rule { height: 1px; background: #d3cbb8; margin: 42px 0 14px; }
 .ax-hero-meta { font-size: 11px; letter-spacing: .12em; color: #8b8677; text-transform: uppercase; font-style: italic; }
 
