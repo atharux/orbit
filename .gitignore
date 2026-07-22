@@ -16,3 +16,6 @@ data/*.db
 !data/sanitized/.gitkeep
 __pycache__/
 *.pyc
+
+# Private operator brief — for Athar only, never committed or shared
+OPERATOR-BRIEF.md
