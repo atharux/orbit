@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import type { Lead, Vertical, OutreachStatus } from './types'
 import { STATUSES, STATUS_LABEL, STATUS_COLOR } from './types'
 import { listLeads, saveLead, removeLead, replaceLeads, exportCsv, exportJson, dedupeLeads } from './storage'
@@ -12,6 +12,9 @@ import { LeadDetail } from './components/LeadDetail'
 import { AddVerticalModal } from './components/AddVerticalModal'
 import { SettingsModal } from './components/SettingsModal'
 
+// Heavy (Three.js) — only pulled in when the graph view is opened.
+const GraphOverlay = lazy(() => import('./graph/GraphOverlay').then(m => ({ default: m.GraphOverlay })))
+
 export function App() {
   const [verticals, setVerticals] = useState<Vertical[]>(loadAllVerticals)
   const [activeVerticalId, setActiveVerticalId] = useState<string>(verticals[0]?.id ?? 'nightlife')
@@ -21,6 +24,7 @@ export function App() {
   const [showAddVertical, setShowAddVertical] = useState(false)
   const [editingVertical, setEditingVertical] = useState<Vertical | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [graphOpen, setGraphOpen] = useState(false)
   const [settings, setSettings] = useState<AppSettings>(loadSettings)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<OutreachStatus | null>(null)
@@ -248,6 +252,14 @@ export function App() {
         <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 8px' }} />
         <button
           className="btn btn-ghost"
+          style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
+          onClick={() => setGraphOpen(true)}
+          title="Open the immersive graph view"
+        >
+          ◇ Graph
+        </button>
+        <button
+          className="btn btn-ghost"
           style={{ height: 30, fontSize: 11 }}
           onClick={() => exportCsv(filteredLeads, `${activeVertical.name.toLowerCase()}-leads`)}
           disabled={filteredLeads.length === 0}
@@ -435,6 +447,18 @@ export function App() {
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
         />
+      )}
+
+      {graphOpen && (
+        <Suspense fallback={
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: '#05060a',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#64748b', fontFamily: "'DM Mono', monospace", fontSize: 13 }}>
+            entering graph space…
+          </div>
+        }>
+          <GraphOverlay leads={leads} onClose={() => setGraphOpen(false)} />
+        </Suspense>
       )}
     </div>
   )
