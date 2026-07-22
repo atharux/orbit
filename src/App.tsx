@@ -15,6 +15,11 @@ import { SettingsModal } from './components/SettingsModal'
 // Heavy (Three.js) — only pulled in when the graph view is opened.
 const GraphOverlay = lazy(() => import('./graph/GraphOverlay').then(m => ({ default: m.GraphOverlay })))
 
+// Cheap env check — the actual sync module (pulls neo4j-driver) is lazy-loaded.
+const SYNC_ENABLED = Boolean(
+  import.meta.env.VITE_NEO4J_URI && import.meta.env.VITE_NEO4J_USERNAME && import.meta.env.VITE_NEO4J_PASSWORD,
+)
+
 export function App() {
   const [verticals, setVerticals] = useState<Vertical[]>(loadAllVerticals)
   const [activeVerticalId, setActiveVerticalId] = useState<string>(verticals[0]?.id ?? 'nightlife')
@@ -25,6 +30,8 @@ export function App() {
   const [editingVertical, setEditingVertical] = useState<Vertical | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
+  const [graphSync, setGraphSync] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle')
+  const syncEnabled = SYNC_ENABLED
   const [settings, setSettings] = useState<AppSettings>(loadSettings)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<OutreachStatus | null>(null)
@@ -130,10 +137,22 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [filteredLeads, selectedLead])
 
+  // Fire-and-forget: push a subset of leads into the Aura graph as they change.
+  // Never blocks the UI; failures surface only as the header sync indicator.
+  function pushToGraph(subset: Lead[]) {
+    if (!syncEnabled || subset.length === 0) return
+    setGraphSync('syncing')
+    import('./graph/syncToNeo4j')
+      .then(m => m.syncLeadsToNeo4j(subset))
+      .then(() => setGraphSync('ok'))
+      .catch(err => { console.warn('graph sync failed', err); setGraphSync('error') })
+  }
+
   async function handleLeadsAdded(newLeads: Lead[]) {
     const all = dedupeLeads([...leads, ...newLeads])
     setLeads(all)
     for (const lead of newLeads) await saveLead(lead, all)
+    pushToGraph(newLeads)
   }
 
   async function handleLeadUpdate(updated: Lead) {
@@ -141,6 +160,7 @@ export function App() {
     setLeads(next)
     setSelectedLead(updated)
     await saveLead(updated, next)
+    pushToGraph([updated])
   }
 
   async function handleLeadDelete(id: string) {
@@ -195,6 +215,7 @@ export function App() {
     const updated = { ...lead, status, updated_at: new Date().toISOString() }
     setLeads(leads.map(l => l.id === id ? updated : l))
     await saveLead(updated, leads.map(l => l.id === id ? updated : l))
+    pushToGraph([updated])
   }
 
   function handleAddVertical(v: Omit<Vertical, 'isCustom'>) {
@@ -250,6 +271,23 @@ export function App() {
           </span>
         </div>
         <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 8px' }} />
+        {syncEnabled && (
+          <button
+            className="btn btn-ghost"
+            style={{
+              height: 30, fontSize: 11, letterSpacing: '.06em',
+              color: graphSync === 'error' ? '#EF4444' : graphSync === 'ok' ? '#10B981' : undefined,
+            }}
+            onClick={() => pushToGraph(leads)}
+            disabled={graphSync === 'syncing' || leads.length === 0}
+            title="Push all current leads into the Neo4j Aura graph"
+          >
+            {graphSync === 'syncing' ? 'Syncing…'
+              : graphSync === 'error' ? 'Sync failed ↻'
+              : graphSync === 'ok' ? 'Synced ✓'
+              : 'Sync graph'}
+          </button>
+        )}
         <button
           className="btn btn-ghost"
           style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
