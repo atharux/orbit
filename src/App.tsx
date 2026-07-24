@@ -15,6 +15,7 @@ import { SettingsModal } from './components/SettingsModal'
 // Heavy (Three.js) — only pulled in when the graph view is opened.
 const GraphOverlay = lazy(() => import('./graph/GraphOverlay').then(m => ({ default: m.GraphOverlay })))
 const AboutExhibit = lazy(() => import('./about/AboutExhibit').then(m => ({ default: m.AboutExhibit })))
+const SequencesPanel = lazy(() => import('./sequences/SequencesPanel').then(m => ({ default: m.SequencesPanel })))
 
 // Cheap env check — the actual sync module (pulls neo4j-driver) is lazy-loaded.
 const SYNC_ENABLED = Boolean(
@@ -32,6 +33,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [sequencesOpen, setSequencesOpen] = useState(false)
   const [graphSync, setGraphSync] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle')
   const [graphSyncMsg, setGraphSyncMsg] = useState('')
   const syncEnabled = SYNC_ENABLED
@@ -323,6 +325,14 @@ export function App() {
         </button>
         <button
           className="btn btn-ghost"
+          style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
+          onClick={() => setSequencesOpen(true)}
+          title="Outreach sequences — the cadence-spine automator"
+        >
+          ⇶ Sequences
+        </button>
+        <button
+          className="btn btn-ghost"
           style={{ height: 30, fontSize: 11 }}
           onClick={() => exportCsv(filteredLeads, `${activeVertical.name.toLowerCase()}-leads`)}
           disabled={filteredLeads.length === 0}
@@ -525,6 +535,11 @@ export function App() {
             onClose={() => setGraphOpen(false)}
             openRouterApiKey={settings.openRouterApiKey || undefined}
             openRouterModel={settings.openRouterModel !== 'auto' ? settings.openRouterModel : undefined}
+            onLeadStatusChange={handleStatusChange}
+            onOpenLead={(id) => {
+              const l = leads.find(x => x.id === id)
+              if (l) { setGraphOpen(false); setSelectedLead(l) }
+            }}
           />
         </Suspense>
       )}
@@ -532,6 +547,17 @@ export function App() {
       {aboutOpen && (
         <Suspense fallback={null}>
           <AboutExhibit onClose={() => setAboutOpen(false)} />
+        </Suspense>
+      )}
+
+      {sequencesOpen && (
+        <Suspense fallback={null}>
+          <SequencesPanel
+            leads={leads}
+            onClose={() => setSequencesOpen(false)}
+            openRouterApiKey={settings.openRouterApiKey || undefined}
+            openRouterModel={settings.openRouterModel !== 'auto' ? settings.openRouterModel : undefined}
+          />
         </Suspense>
       )}
     </div>
