@@ -20,7 +20,14 @@
 const CACHE_KEY = 'openrouter_free_models';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // browser
 const MEM_TTL_MS = 10 * 60 * 1000; // server
-const FALLBACK_FREE_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
+// Safety net ONLY for when GET /models can't be reached — the live discovery
+// below is the real source of truth. Keep this to a few currently-free ids
+// (verified live 2026-07-24); if they go stale, discovery still recovers.
+const FALLBACK_FREE_MODELS = [
+  'inclusionai/ling-3.0-flash:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
+];
+const FALLBACK_FREE_MODEL = FALLBACK_FREE_MODELS[0];
 
 // Coder/math models: high context but terrible rate limits and wrong use case.
 const SKIP_MODEL_RE = /coder|math|code-/i;
@@ -80,9 +87,9 @@ export async function fetchAndCacheFreeModels(apiKey: string): Promise<string[]>
       if (hasLS) localStorage.setItem(CACHE_KEY, JSON.stringify({ models: free, at: Date.now() }));
       else MEM_CACHE = { models: free, at: Date.now() };
     }
-    return free.length ? free : [FALLBACK_FREE_MODEL];
+    return free.length ? free : FALLBACK_FREE_MODELS;
   } catch {
-    return getCachedFreeModels() ?? [FALLBACK_FREE_MODEL];
+    return getCachedFreeModels() ?? FALLBACK_FREE_MODELS;
   }
 }
 
@@ -113,12 +120,16 @@ export interface CallOptions {
 export async function callOpenRouter(opts: CallOptions): Promise<{ text: string; model: string }> {
   if (!opts.apiKey) throw new Error('No API key found. Add an OpenRouter key in Settings.');
 
-  const cached = (getCachedFreeModels() ?? []).filter((m) => !SKIP_MODEL_RE.test(m));
+  // Discover live free models when the cache is cold — otherwise this path would
+  // fall back to the tiny hardcoded list and die the moment one id goes stale.
+  let free = getCachedFreeModels();
+  if (!free || !free.length) free = await fetchAndCacheFreeModels(opts.apiKey);
+  const cached = (free ?? []).filter((m) => !SKIP_MODEL_RE.test(m));
   const wanted = opts.model && !SKIP_MODEL_RE.test(opts.model) && !DEPRIORITISE_RE.test(opts.model)
     ? opts.model
     : undefined;
-  const candidates = [...new Set([wanted, ...cached, FALLBACK_FREE_MODEL].filter(Boolean) as string[])]
-    .slice(0, opts.queueCap ?? 4);
+  const candidates = [...new Set([wanted, ...cached, ...FALLBACK_FREE_MODELS].filter(Boolean) as string[])]
+    .slice(0, opts.queueCap ?? 6);
 
   let lastError = '';
   for (const model of candidates) {
@@ -186,7 +197,7 @@ export async function generateJSON(opts: Omit<CallOptions, 'messages'> & { promp
   const wanted = opts.model && !SKIP_MODEL_RE.test(opts.model) && !DEPRIORITISE_RE.test(opts.model)
     ? opts.model
     : undefined;
-  const queue = [...new Set([wanted, ...usable, FALLBACK_FREE_MODEL].filter(Boolean) as string[])]
+  const queue = [...new Set([wanted, ...usable, ...FALLBACK_FREE_MODELS].filter(Boolean) as string[])]
     .slice(0, opts.queueCap ?? 6);
 
   let lastErr: unknown;
