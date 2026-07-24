@@ -11,6 +11,8 @@ import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink } from './neo4jSource'
 import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, type AskResult } from './ask'
+import { exportCsv } from '../storage'
+import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
 
 // Full-screen immersive 3D graph. The light dashboard drops away into a dark
 // space where venues/contacts float and relationships stream particles. Orbit
@@ -174,6 +176,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [meta, setMeta] = useState<{ origin: Origin; nodes: number; links: number; note?: string } | null>(null)
   const [liveWarning, setLiveWarning] = useState<string | null>(null)
   const [selected, setSelected] = useState<GraphNode | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([]) // multi-selection for bulk actions
+  const [bulkMsg, setBulkMsg] = useState('')
   const [errMsg, setErrMsg] = useState('')
   const [graphData, setGraphData] = useState<GraphData | null>(null)
 
@@ -225,6 +229,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       const el = containerRef.current!
       const highlightNodes = new Set<string>()
       const highlightLinks = new Set<GraphLink>()
+      const multiSel = new Set<string>() // shift/⌘-click or preset-driven multi-selection
       let focused: GraphNode | null = null
 
       const nodeIsHot = (n: any) => highlightNodes.size === 0 || highlightNodes.has(n.id)
@@ -342,6 +347,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       function selectNode(node: any) {
         focused = node
+        multiSel.clear()
+        setSelectedIds([])
         controls.autoRotate = false
         highlightNodes.clear()
         highlightLinks.clear()
@@ -363,24 +370,50 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         Graph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, 1400)
       }
 
-      Graph.onNodeClick(selectNode)
+      // Reflect the multi-selection into the highlight + sync to React.
+      function applySelectionHighlight() {
+        highlightNodes.clear(); highlightLinks.clear()
+        multiSel.forEach(id => highlightNodes.add(id))
+        for (const l of (Graph.graphData().links as any[])) {
+          const s = typeof l.source === 'object' ? l.source.id : l.source
+          const t = typeof l.target === 'object' ? l.target.id : l.target
+          if (multiSel.has(s) && multiSel.has(t)) highlightLinks.add(l)
+        }
+        refreshHighlight()
+        controls.autoRotate = multiSel.size === 0
+        setSelectedIds([...multiSel])
+      }
+      function toggleSelect(id: string) {
+        multiSel.has(id) ? multiSel.delete(id) : multiSel.add(id)
+        setSelected(null)
+        applySelectionHighlight()
+      }
+
+      // Plain click = focus one node; shift/⌘/ctrl-click = add/remove from selection.
+      Graph.onNodeClick((node: any, event: any) => {
+        if (event && (event.shiftKey || event.metaKey || event.ctrlKey)) toggleSelect(node.id)
+        else { multiSel.clear(); selectNode(node) }
+      })
 
       Graph.onBackgroundClick(() => {
         focused = null
         controls.autoRotate = true
+        multiSel.clear()
         highlightNodes.clear()
         highlightLinks.clear()
         refreshHighlight()
         setSelected(null)
+        setSelectedIds([])
       })
 
       // Imperative handle for the ask panel: light up an arbitrary node set.
       function focusNodes(ids: string[]) {
         highlightNodes.clear()
         highlightLinks.clear()
+        multiSel.clear()
         setSelected(null)
-        if (ids.length === 0) { controls.autoRotate = true; refreshHighlight(); return }
-        ids.forEach(id => highlightNodes.add(id))
+        if (ids.length === 0) { controls.autoRotate = true; refreshHighlight(); setSelectedIds([]); return }
+        ids.forEach(id => { highlightNodes.add(id); multiSel.add(id) })
         for (const l of (Graph.graphData().links as any[])) {
           const s = typeof l.source === 'object' ? l.source.id : l.source
           const t = typeof l.target === 'object' ? l.target.id : l.target
@@ -389,6 +422,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         refreshHighlight()
         controls.autoRotate = false
         Graph.zoomToFit(1400, 90, (n: any) => highlightNodes.has(n.id))
+        // A preset/filter result IS a selection you can act on in bulk.
+        setSelectedIds([...ids])
       }
 
       // Select a node by id (used by the connections list to navigate).
@@ -513,6 +548,44 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     graphRef.current?.focusNodes([])
   }
   const filterActive = Boolean(filterText.trim()) || activeKinds.size > 0 || verifiedOnly
+
+  // ---- bulk actions on the selection (closes "found the leak → now act") ----
+  const selectedLeads: Lead[] = (() => {
+    const seen = new Set<string>(); const out: Lead[] = []
+    for (const id of selectedIds) {
+      const m = /^(?:venue|contact):(.+)$/.exec(id)
+      if (!m || seen.has(m[1])) continue
+      seen.add(m[1])
+      const l = leads.find(x => x.id === m[1])
+      if (l) out.push(l)
+    }
+    return out
+  })()
+  const selectedNodes = graphData ? (selectedIds.map(id => graphData.nodes.find(n => n.id === id)).filter(Boolean) as GraphNode[]) : []
+
+  function bulkStatus(status: OutreachStatus) {
+    if (!onLeadStatusChange || !selectedLeads.length) return
+    selectedLeads.forEach(l => onLeadStatusChange(l.id, status))
+    setBulkMsg(`Set ${selectedLeads.length} to "${STATUS_LABEL[status]}"`)
+  }
+  function bulkEnroll(seqId: string) {
+    if (!selectedLeads.length) return
+    const seqs = loadSequences()
+    let target = seqs.find(s => s.id === seqId)
+    if (!target) { target = newSequence('From graph selection'); seqs.push(target) }
+    const updated = enrollLeads(target, selectedLeads.map(l => l.id))
+    saveSequences(seqs.map(s => (s.id === updated.id ? updated : s)))
+    setBulkMsg(`Enrolled ${selectedLeads.length} into "${updated.name}"`)
+  }
+  function bulkExport() {
+    if (selectedLeads.length) { exportCsv(selectedLeads, 'graph-selection'); return }
+    const esc = (v: string) => `"${(v || '').replace(/"/g, '""')}"`
+    const rows = selectedNodes.map(n => [n.label, KIND_LABEL[n.kind], n.sub ?? '', n.district ?? ''].map(esc).join(','))
+    const csv = [['name', 'kind', 'detail', 'district'].map(esc).join(','), ...rows].join('\r\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
+    const a = document.createElement('a'); a.href = url; a.download = `graph-selection-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url)
+  }
+  function clearSelection() { setBulkMsg(''); graphRef.current?.focusNodes([]) }
 
   const stats = graphData ? computeStats(graphData) : null
   const neighbors = graphData && selected ? neighborsOf(graphData, selected.id) : []
@@ -795,7 +868,32 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         </div>
       )}
 
-      <div style={styles.hint}>drag to orbit · scroll to zoom · click a node to fly in</div>
+      {/* Bulk action bar — the selection (from clicks OR a preset) becomes actions */}
+      {selectedIds.length > 0 && (
+        <div style={styles.bulkBar}>
+          <span style={styles.bulkCount}>
+            {selectedIds.length} selected{selectedLeads.length !== selectedIds.length ? ` · ${selectedLeads.length} editable` : ''}
+          </span>
+          {onLeadStatusChange && selectedLeads.length > 0 && (
+            <select style={styles.bulkSelect} value="" onChange={e => e.target.value && bulkStatus(e.target.value as OutreachStatus)}>
+              <option value="">Set status…</option>
+              {STATUSES.map(st => <option key={st} value={st}>{STATUS_LABEL[st]}</option>)}
+            </select>
+          )}
+          {selectedLeads.length > 0 && (
+            <select style={styles.bulkSelect} value="" onChange={e => { if (e.target.value) bulkEnroll(e.target.value) }}>
+              <option value="">Enroll in sequence…</option>
+              {loadSequences().map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <option value="__new">+ New sequence</option>
+            </select>
+          )}
+          <button style={styles.bulkBtn} onClick={bulkExport}>Export ↓</button>
+          <button style={styles.bulkClear} onClick={clearSelection}>Clear</button>
+          {bulkMsg && <span style={styles.bulkMsg}>{bulkMsg}</span>}
+        </div>
+      )}
+
+      <div style={styles.hint}>drag to orbit · scroll to zoom · click to fly in · shift-click to multi-select</div>
     </div>
   )
 }
@@ -1001,6 +1099,26 @@ function makeStyles(mode: ThemeMode): Styles {
       position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 2,
       color: t.faint2, fontFamily: mono, fontSize: 11, pointerEvents: 'none',
     },
+    bulkBar: {
+      position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)', zIndex: 4,
+      display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', maxWidth: '92vw',
+      background: t.bg, border: `1px solid ${t.accentDim}`, borderRadius: 8, padding: '8px 12px',
+      boxShadow: t.shadow, fontFamily: mono, color: t.text,
+    },
+    bulkCount: { fontSize: 11, color: t.text2, letterSpacing: '.04em', fontWeight: 600 },
+    bulkSelect: {
+      background: t.solid, border: `1px solid ${t.border}`, borderRadius: 4, color: t.text,
+      fontFamily: mono, fontSize: 11, padding: '5px 7px', cursor: 'pointer', outline: 'none',
+    },
+    bulkBtn: {
+      background: t.btn, border: `1px solid ${t.accentDim}`, borderRadius: 4, color: t.accent,
+      fontFamily: mono, fontSize: 11, padding: '5px 11px', cursor: 'pointer',
+    },
+    bulkClear: {
+      background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4, color: t.muted,
+      fontFamily: mono, fontSize: 10.5, padding: '5px 9px', cursor: 'pointer',
+    },
+    bulkMsg: { fontSize: 10.5, color: '#34d399' },
     themeBtn: {
       fontFamily: mono, fontSize: 11, color: t.text, background: t.btn,
       border: `1px solid ${t.border}`, borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
