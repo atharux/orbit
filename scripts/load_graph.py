@@ -71,6 +71,8 @@ def load(session) -> None:
         UNWIND $rows AS row
         MERGE (c:Contact {contact_id: row.contact_id})
         SET c.role = row.role,
+            c.name = coalesce(row.contact_name, row.person),
+            c.title = row.title,
             c.verified = (toLower(coalesce(row.verified,'false')) IN ['true','1','yes'])
         """, rows=contacts)
 

@@ -40,8 +40,11 @@ export const KIND_COLOR: Record<NodeKind, string> = {
   sequence: '#34d399', // green
 }
 
+// NOTE: the internal kind key stays 'venue' (and the Neo4j label stays :Venue) so
+// the loader and live Aura data keep working — but the DISPLAY noun is "Company",
+// because this dataset is trades companies, not nightlife venues.
 export const KIND_LABEL: Record<NodeKind, string> = {
-  venue: 'Venue',
+  venue: 'Company',
   contact: 'Contact',
   source: 'Source',
   sequence: 'Sequence',

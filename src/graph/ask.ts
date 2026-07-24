@@ -47,7 +47,7 @@ export const PRESETS: Preset[] = [
   },
   {
     id: 'venues-no-verified-contact',
-    q: 'Venues with no verified contact',
+    q: 'Companies with no verified contact',
     run: g => {
       const worksAt = linksOfKind(g, 'WORKS_AT') // contact -> venue
       const verified = new Set(nodesOfKind(g, 'contact').filter(c => c.verified).map(c => c.id))
@@ -55,15 +55,15 @@ export const PRESETS: Preset[] = [
       const hits = nodesOfKind(g, 'venue').filter(v => !venuesWithVerified.has(v.id))
       return {
         answer: hits.length
-          ? `${hits.length} venue${hits.length === 1 ? '' : 's'} have no verified contact yet — the whitespace to prospect next.`
-          : 'Every venue has at least one verified contact.',
+          ? `${hits.length} ${hits.length === 1 ? 'company has' : 'companies have'} no verified contact yet — the whitespace to prospect next.`
+          : 'Every company has at least one verified contact.',
         nodeIds: hits.map(v => v.id),
       }
     },
   },
   {
     id: 'seq-multi-verified',
-    q: 'Sequences hitting venues with 2+ verified contacts',
+    q: 'Sequences hitting companies with 2+ verified contacts',
     run: g => {
       const worksAt = linksOfKind(g, 'WORKS_AT')
       const verified = new Set(nodesOfKind(g, 'contact').filter(c => c.verified).map(c => c.id))
@@ -76,15 +76,15 @@ export const PRESETS: Preset[] = [
       const seqCount = [...hitIds].filter(id => id.startsWith('seq')).length
       return {
         answer: hitIds.size
-          ? `Outreach is concentrated: sequences targeting ${seqCount ? seqCount + ' ' : ''}venue-clusters with more than one verified contact.`
-          : 'No sequence currently targets a venue with more than one verified contact.',
+          ? `Outreach is concentrated: sequences targeting ${seqCount ? seqCount + ' ' : ''}company-clusters with more than one verified contact.`
+          : 'No sequence currently targets a company with more than one verified contact.',
         nodeIds: [...hitIds],
       }
     },
   },
   {
     id: 'venues-per-district',
-    q: 'Venue count by district',
+    q: 'Company count by district',
     run: g => {
       const byDistrict = new Map<string, number>()
       for (const v of nodesOfKind(g, 'venue')) {
@@ -94,8 +94,8 @@ export const PRESETS: Preset[] = [
       const top = [...byDistrict.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
       return {
         answer: top.length
-          ? 'Venues by district — ' + top.map(([d, n]) => `${d}: ${n}`).join(' · ')
-          : 'No venue districts recorded.',
+          ? 'Companies by district — ' + top.map(([d, n]) => `${d}: ${n}`).join(' · ')
+          : 'No company districts recorded.',
         nodeIds: nodesOfKind(g, 'venue').map(v => v.id),
       }
     },
@@ -120,28 +120,28 @@ export const PRESETS: Preset[] = [
   },
   {
     id: 'no-website',
-    q: 'Venues with no website',
+    q: 'Companies with no website',
     run: g => {
       const hits = nodesOfKind(g, 'venue').filter(v => !v.website)
       return {
         answer: hits.length
-          ? `${hits.length} venue${hits.length === 1 ? '' : 's'} have no website on file — prime targets if you sell websites.`
-          : 'Every venue has a website on file.',
+          ? `${hits.length} ${hits.length === 1 ? 'company has' : 'companies have'} no website on file — prime targets if you sell websites.`
+          : 'Every company has a website on file.',
         nodeIds: hits.map(v => v.id),
       }
     },
   },
   {
     id: 'targeted-no-contact',
-    q: 'Venues targeted by a sequence but with zero contacts',
+    q: 'Companies targeted by a sequence but with zero contacts',
     run: g => {
       const targeted = new Set(linksOfKind(g, 'TARGETS').map(l => l.target))
       const hasContact = new Set(linksOfKind(g, 'WORKS_AT').map(l => l.target))
       const hits = nodesOfKind(g, 'venue').filter(v => targeted.has(v.id) && !hasContact.has(v.id))
       return {
         answer: hits.length
-          ? `${hits.length} venue${hits.length === 1 ? '' : 's'} are in a sequence but have no contact attached — outreach with nobody to reach.`
-          : 'Every targeted venue has at least one contact.',
+          ? `${hits.length} ${hits.length === 1 ? 'company is' : 'companies are'} in a sequence but have no contact attached — outreach with nobody to reach.`
+          : 'Every targeted company has at least one contact.',
         nodeIds: hits.map(v => v.id),
       }
     },
@@ -151,9 +151,11 @@ export const PRESETS: Preset[] = [
 // --- live free-text engine (NL -> Cypher -> Aura) ---------------------------
 
 const SCHEMA_PROMPT = `You write a single read-only Cypher query for a Neo4j graph.
+The :Venue label represents a business/company (this dataset is trades businesses),
+so map "business", "company", or "trade" in the question to the :Venue label.
 Schema:
   (:Venue {name, category, district})
-  (:Contact {role, verified})
+  (:Contact {name, title, role, verified})
   (:Source {name})
   (:Sequence {name, status})
   (:Contact)-[:WORKS_AT]->(:Venue)
@@ -218,7 +220,7 @@ export async function askLocal(
   )
   const edgeLines = g.links.map(l => `${l.source} -${l.kind}-> ${l.target}`)
   const prompt = `You answer a question about a small graph and return the node ids that answer it.
-Node kinds: venue, contact, source, sequence.
+Node kinds: venue, contact, source, sequence. (A "venue" node is a business/company — treat "business", "company", "trade", and "venue" as the same kind.)
 Relationships: (contact)-WORKS_AT->(venue), (contact)-VERIFIED_BY->(source), (contact)-ENROLLED_IN->(sequence), (sequence)-TARGETS->(venue).
 
 NODES (id, kind, label, flags):

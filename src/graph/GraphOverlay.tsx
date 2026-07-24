@@ -3,12 +3,13 @@ import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import SpriteText from 'three-spritetext'
 import ForceGraph3D from '3d-force-graph'
-import type { Lead } from '../types'
+import type { Lead, OutreachStatus } from '../types'
+import { STATUSES, STATUS_LABEL, STATUS_COLOR } from '../types'
 import type { GraphData, GraphNode, GraphLink } from './types'
 import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
-import { isLiveConfigured, fetchLiveGraph } from './neo4jSource'
+import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink } from './neo4jSource'
 import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, type AskResult } from './ask'
 
 // Full-screen immersive 3D graph. The light dashboard drops away into a dark
@@ -96,6 +97,27 @@ function computeStats(g: GraphData) {
   }
 }
 
+// venue/contact nodes encode the originating lead id (buildGraph.ts). Recover it
+// so the selected-node card can act on the real record. Returns null for
+// source/sequence nodes and for live/sample graphs (ids won't match a lead).
+function leadForNode(node: GraphNode | null, leads: Lead[]): Lead | null {
+  if (!node) return null
+  const m = /^(?:venue|contact):(.+)$/.exec(node.id)
+  if (!m) return null
+  return leads.find(l => l.id === m[1]) ?? null
+}
+
+// Normalize a stored website into an openable URL (leads often omit the scheme).
+function hrefFor(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`
+}
+
+// Instagram may be stored as a handle (@name) or a full URL.
+function instagramHref(ig: string): string {
+  if (/^https?:\/\//i.test(ig)) return ig
+  return `https://instagram.com/${ig.replace(/^@/, '')}`
+}
+
 interface Neighbor { id: string; rel: GraphLink['kind']; dir: 'in' | 'out'; node: GraphNode }
 
 function neighborsOf(g: GraphData, id: string): Neighbor[] {
@@ -112,11 +134,36 @@ function neighborsOf(g: GraphData, id: string): Neighbor[] {
   return out
 }
 
-export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel }: {
+// Smart find: multi-token AND match over a node's label/sub/district, plus
+// kind and verified constraints. Returns the ids of matching nodes.
+function filterNodeIds(
+  g: GraphData, text: string, kinds: Set<GraphNode['kind']>, verifiedOnly: boolean,
+): string[] {
+  const tokens = text.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  return g.nodes
+    .filter(n => {
+      if (kinds.size && !kinds.has(n.kind)) return false
+      if (verifiedOnly && !n.verified) return false
+      if (tokens.length) {
+        const hay = `${n.label} ${n.sub ?? ''} ${n.district ?? ''}`.toLowerCase()
+        if (!tokens.every(t => hay.includes(t))) return false
+      }
+      return true
+    })
+    .map(n => n.id)
+}
+
+export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel, onLeadStatusChange, onOpenLead }: {
   leads: Lead[]
   onClose: () => void
   openRouterApiKey?: string
   openRouterModel?: string
+  // Persist an outreach-status change made from a node's action bar. Optional —
+  // when absent (e.g. live/sample graph), the status control is hidden.
+  onLeadStatusChange?: (leadId: string, status: OutreachStatus) => void
+  // Jump from a company/contact node to its full lead-detail panel in the main
+  // app (closes the graph). Optional — only shown for nodes backed by a lead.
+  onOpenLead?: (leadId: string) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<any>(null)
@@ -138,6 +185,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
   const canAskLocal = !canAskLive && localAvailable(openRouterApiKey, graphData)
+
+  // FIND panel state — instant client-side search + toggle filter chips.
+  const [filterText, setFilterText] = useState('')
+  const [activeKinds, setActiveKinds] = useState<Set<GraphNode['kind']>>(new Set())
+  const [verifiedOnly, setVerifiedOnly] = useState(false)
+  const [filterCount, setFilterCount] = useState<number | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -229,6 +282,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         .linkDirectionalParticles((l: any) => (highlightLinks.has(l) ? 3 : 0))
         .linkDirectionalParticleWidth(1.8)
         .linkDirectionalParticleSpeed(0.008)
+        .linkDirectionalParticleColor((l: any) => ct().linkFull[l.kind as GraphLink['kind']])
         .width(el.clientWidth)
         .height(el.clientHeight)
 
@@ -258,6 +312,25 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       const controls: any = Graph.controls()
       controls.autoRotate = true
       controls.autoRotateSpeed = 0.55
+
+      // Ambient "synaptic" heartbeat — a slow, sparse impulse that fires ONLY
+      // along live/covered edges: a verified contact reaching its company, or a
+      // sequence targeting a company. Cold prospects (no verified contact, not
+      // targeted) never fire, so the graph's resting activity reads as real
+      // outreach coverage — quiet regions are the whitespace to work next.
+      // Subtle by design: at most one impulse in flight per tick.
+      const verifiedIds = new Set(
+        data.nodes.filter(n => n.kind === 'contact' && n.verified).map(n => n.id),
+      )
+      const isLiveLink = (l: any) => {
+        const s = typeof l.source === 'object' ? l.source.id : l.source
+        return l.kind === 'TARGETS'
+          || ((l.kind === 'WORKS_AT' || l.kind === 'VERIFIED_BY' || l.kind === 'ENROLLED_IN') && verifiedIds.has(s))
+      }
+      const impulseTimer = window.setInterval(() => {
+        const live = (Graph.graphData().links as any[]).filter(isLiveLink)
+        if (live.length) (Graph as any).emitParticle(live[Math.floor(Math.random() * live.length)])
+      }, 680)
 
       function refreshHighlight() {
         Graph.nodeColor(Graph.nodeColor())
@@ -343,7 +416,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       // fit once the layout settles
       setTimeout(() => Graph.zoomToFit(1200, 60), 700)
 
-      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme }
+      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer }
       void focused
     }
 
@@ -352,6 +425,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       const g = graphRef.current
       if (g) {
         window.removeEventListener('resize', g.onResize)
+        clearInterval(g.impulseTimer)
         g.Graph._destructor?.()
       }
       graphRef.current = null
@@ -408,10 +482,62 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     graphRef.current?.focusNodes(graphData.nodes.filter(n => n.kind === kind).map(n => n.id))
   }
 
+  // FIND: recompute the highlighted set from the current search + chips and
+  // push it to the canvas. Empty filter releases the highlight (rest state).
+  function applyFilter(text: string, kinds: Set<GraphNode['kind']>, vOnly: boolean) {
+    if (!graphData) return
+    const active = Boolean(text.trim()) || kinds.size > 0 || vOnly
+    if (!active) { setFilterCount(null); graphRef.current?.focusNodes([]); return }
+    const ids = filterNodeIds(graphData, text, kinds, vOnly)
+    setFilterCount(ids.length)
+    graphRef.current?.focusNodes(ids)
+  }
+
+  function onSearchChange(v: string) {
+    setFilterText(v)
+    applyFilter(v, activeKinds, verifiedOnly)
+  }
+  function toggleKind(k: GraphNode['kind']) {
+    const next = new Set(activeKinds)
+    next.has(k) ? next.delete(k) : next.add(k)
+    setActiveKinds(next)
+    applyFilter(filterText, next, verifiedOnly)
+  }
+  function toggleVerified() {
+    const v = !verifiedOnly
+    setVerifiedOnly(v)
+    applyFilter(filterText, activeKinds, v)
+  }
+  function clearFilter() {
+    setFilterText(''); setActiveKinds(new Set()); setVerifiedOnly(false); setFilterCount(null)
+    graphRef.current?.focusNodes([])
+  }
+  const filterActive = Boolean(filterText.trim()) || activeKinds.size > 0 || verifiedOnly
+
   const stats = graphData ? computeStats(graphData) : null
   const neighbors = graphData && selected ? neighborsOf(graphData, selected.id) : []
+  // The real lead behind the selected node (venue/contact on a leads graph),
+  // driving the action bar. Re-derived from the live `leads` prop so a status
+  // change re-renders the control with the new value.
+  const activeLead = leadForNode(selected, leads)
   const nodeCol = CANVAS[theme].node // theme-aware node/relationship colours for the HTML chrome
   const relCol = CANVAS[theme].linkFull
+  // Only offer chips for kinds/attributes actually present in this graph.
+  const presentKinds = graphData
+    ? (Object.keys(KIND_COLOR) as GraphNode['kind'][]).filter(k => graphData.nodes.some(n => n.kind === k))
+    : []
+  const hasVerifiedNodes = graphData ? graphData.nodes.some(n => n.verified) : false
+
+  // Live Aura instance metadata + schema counts for the "it's real" demo chrome.
+  const instance = meta?.origin === 'live' ? liveInstanceInfo() : null
+  const nodeCounts = graphData
+    ? graphData.nodes.reduce<Record<string, number>>((a, n) => { a[n.kind] = (a[n.kind] ?? 0) + 1; return a }, {})
+    : {}
+  const relCounts = graphData
+    ? graphData.links.reduce<Record<string, number>>((a, l) => { a[l.kind] = (a[l.kind] ?? 0) + 1; return a }, {})
+    : {}
+  // Open the live model in Neo4j Browser's own schema view — proof it's the real DB.
+  const browserUrl = meta?.origin === 'live' ? browserDeepLink('CALL db.schema.visualization()') : null
 
   const originBadge: Record<Origin, { text: string; color: string }> = {
     live: { text: 'LIVE · NEO4J AURA', color: '#34d399' },
@@ -434,6 +560,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             {originBadge[meta.origin].text}
           </div>
         )}
+        {instance && (
+          <div style={styles.instance} title={`${instance.host} · db: ${instance.database} · user: ${instance.user}`}>
+            ◆ {instance.name ?? instance.instanceId}
+            <span style={styles.instanceId}>{instance.name ? instance.instanceId : instance.host}</span>
+          </div>
+        )}
         {meta && <div style={styles.counts}>{meta.nodes} nodes · {meta.links} edges</div>}
         <div style={{ flex: 1 }} />
         <button
@@ -451,7 +583,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         <div style={styles.stats}>
           <div style={styles.statsHead}>OUTREACH STATE</div>
           <div style={styles.statGrid}>
-            <Stat label="Venues" value={stats.venues} color={CANVAS[theme].node.venue} s={styles} />
+            <Stat label="Companies" value={stats.venues} color={CANVAS[theme].node.venue} s={styles} />
             <Stat label="Contacts" value={stats.contacts} color={CANVAS[theme].node.contact} s={styles} />
             <Stat label="Verified" value={stats.verified} color={CANVAS[theme].node.sequence} s={styles} />
             <Stat label="Sources" value={stats.sources} color={CANVAS[theme].node.source} s={styles} />
@@ -467,7 +599,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           </div>
           {stats.uncovered > 0 && (
             <button style={styles.statAction} onClick={() => runPreset(PRESETS[1])}>
-              {stats.uncovered} venue{stats.uncovered === 1 ? '' : 's'} with no verified contact →
+              {stats.uncovered} {stats.uncovered === 1 ? 'company' : 'companies'} with no verified contact →
             </button>
           )}
         </div>
@@ -479,27 +611,57 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       {status === 'loading' && <div style={styles.center}>connecting to graph…</div>}
       {status === 'error' && <div style={styles.center}>could not build graph — {errMsg}</div>}
 
-      {/* Legend — nodes (dots) + relationships (arrows) */}
-      <div style={styles.legend}>
-        <div style={styles.legendHead}>NODES · click to spotlight</div>
-        {(Object.keys(KIND_COLOR) as GraphNode['kind'][]).map(k => (
-          <button key={k} style={styles.legendBtn} onClick={() => spotlightKind(k)} title={`Light up all ${KIND_LABEL[k]} nodes`}>
-            <span style={{ ...styles.legendDot, background: nodeCol[k] }} />
-            {KIND_LABEL[k]}
-          </button>
-        ))}
-        <div style={{ ...styles.legendHead, marginTop: 8 }}>RELATIONSHIPS</div>
-        {(Object.keys(REL_LABEL) as GraphLink['kind'][]).map(k => (
-          <div key={k} style={styles.legendRow}>
-            <span style={{ ...styles.legendArrow, color: relCol[k] }}>→</span>
-            {REL_LABEL[k]}
-          </div>
-        ))}
-      </div>
-
       {/* Ask the graph */}
       {status === 'ready' && (
         <div style={styles.ask}>
+          {/* FIND — instant client-side search + filter chips */}
+          <div style={styles.askHead}>
+            FIND
+            {filterCount != null && (
+              <span style={{ ...styles.askLive, color: filterCount ? nodeCol.venue : '#EF4444' }}>
+                {filterCount} match{filterCount === 1 ? '' : 'es'}
+              </span>
+            )}
+          </div>
+          <div style={styles.askRow}>
+            <input
+              style={styles.askInput}
+              placeholder="Find by name, category, city…"
+              value={filterText}
+              onChange={e => onSearchChange(e.target.value)}
+            />
+            {filterActive && (
+              <button style={styles.askBtn} onClick={clearFilter} title="Clear filter">✕</button>
+            )}
+          </div>
+          {(presentKinds.length > 0 || hasVerifiedNodes) && (
+            <div style={styles.filterChips}>
+              {presentKinds.map(k => {
+                const on = activeKinds.has(k)
+                return (
+                  <button
+                    key={k}
+                    style={{ ...styles.chip, ...(on ? { borderColor: nodeCol[k], color: nodeCol[k], background: nodeCol[k] + '1f' } : null) }}
+                    onClick={() => toggleKind(k)}
+                  >
+                    <span style={{ ...styles.chipDot, background: nodeCol[k] }} />
+                    {KIND_LABEL[k]}
+                  </button>
+                )
+              })}
+              {hasVerifiedNodes && (
+                <button
+                  style={{ ...styles.chip, ...(verifiedOnly ? { borderColor: nodeCol.sequence, color: nodeCol.sequence, background: nodeCol.sequence + '1f' } : null) }}
+                  onClick={toggleVerified}
+                >
+                  ✓ Verified
+                </button>
+              )}
+            </div>
+          )}
+
+          <div style={styles.filterDivider} />
+
           <div style={styles.askHead}>
             ASK THE GRAPH
             <span style={{ ...styles.askLive, color: canAskLive ? '#34d399' : canAskLocal ? '#22d3ee' : '#8b8677' }}>
@@ -541,6 +703,31 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               <button style={styles.clearBtn} onClick={clearAsk}>clear</button>
             </div>
           )}
+
+          {/* Schema / legend — folded into the base of this plate so nothing overlaps */}
+          <div style={styles.schema}>
+            <div style={styles.legendHead}>{instance ? 'SCHEMA · LIVE' : 'NODES · click to spotlight'}</div>
+            {(Object.keys(KIND_COLOR) as GraphNode['kind'][]).map(k => (
+              <button key={k} style={{ ...styles.legendBtn, opacity: nodeCounts[k] ? 1 : 0.4 }} onClick={() => spotlightKind(k)} title={`Light up all ${KIND_LABEL[k]} nodes`}>
+                <span style={{ ...styles.legendDot, background: nodeCol[k] }} />
+                {KIND_LABEL[k]}
+                <span style={styles.legendCount}>{nodeCounts[k] ?? 0}</span>
+              </button>
+            ))}
+            <div style={{ ...styles.legendHead, marginTop: 8 }}>RELATIONSHIPS</div>
+            {(Object.keys(REL_LABEL) as GraphLink['kind'][]).map(k => (
+              <div key={k} style={{ ...styles.legendRow, opacity: relCounts[k] ? 1 : 0.4 }}>
+                <span style={{ ...styles.legendArrow, color: relCol[k] }}>→</span>
+                {REL_LABEL[k]}
+                <span style={styles.legendCount}>{relCounts[k] ?? 0}</span>
+              </div>
+            ))}
+            {browserUrl && (
+              <a style={styles.browserBtn} href={browserUrl} target="_blank" rel="noopener noreferrer" title="Open this Aura instance in Neo4j Browser">
+                Open in Neo4j Browser ↗
+              </a>
+            )}
+          </div>
         </div>
       )}
 
@@ -553,6 +740,43 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           <div style={styles.cardTitle}>{selected.label}</div>
           {selected.sub && <div style={styles.cardSub}>{selected.sub}</div>}
           {selected.district && <div style={styles.cardSub}>{selected.district}</div>}
+
+          {/* Action bar — only for nodes backed by a real lead */}
+          {activeLead && (
+            <div style={styles.actions}>
+              <div style={styles.actionLinks}>
+                {activeLead.website && (
+                  <a style={styles.actionBtn} href={hrefFor(activeLead.website)} target="_blank" rel="noopener noreferrer">↗ Website</a>
+                )}
+                {activeLead.email && (
+                  <a style={styles.actionBtn} href={`mailto:${activeLead.email}`}>✉ Email</a>
+                )}
+                {activeLead.phone && (
+                  <a style={styles.actionBtn} href={`tel:${activeLead.phone}`}>☎ Call</a>
+                )}
+                {activeLead.instagram && (
+                  <a style={styles.actionBtn} href={instagramHref(activeLead.instagram)} target="_blank" rel="noopener noreferrer">◎ Instagram</a>
+                )}
+              </div>
+              {onLeadStatusChange && (
+                <label style={styles.statusRow}>
+                  <span style={styles.statusLabel}>Status</span>
+                  <select
+                    style={{ ...styles.statusSelect, color: STATUS_COLOR[activeLead.status], borderColor: STATUS_COLOR[activeLead.status] + '66' }}
+                    value={activeLead.status}
+                    onChange={e => onLeadStatusChange(activeLead.id, e.target.value as OutreachStatus)}
+                  >
+                    {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                  </select>
+                </label>
+              )}
+              {onOpenLead && (
+                <button style={styles.openDetailBtn} onClick={() => onOpenLead(activeLead.id)}>
+                  Open full detail ↗
+                </button>
+              )}
+            </div>
+          )}
 
           {neighbors.length > 0 && (
             <div style={styles.connections}>
@@ -621,6 +845,11 @@ function makeStyles(mode: ThemeMode): Styles {
     brandDot: { width: 8, height: 8, borderRadius: '50%', background: t.accent, boxShadow: t.brandGlow },
     brandSub: { fontSize: 10, color: t.faint, letterSpacing: '.1em', marginLeft: 4 },
     badge: { fontSize: 10, letterSpacing: '.14em', border: '1px solid', borderRadius: 3, padding: '3px 8px' },
+    instance: {
+      display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, letterSpacing: '.1em',
+      color: '#34d399', border: '1px solid #34d39955', borderRadius: 3, padding: '3px 8px',
+    },
+    instanceId: { color: t.faint, letterSpacing: '.04em', fontSize: 9 },
     counts: { fontSize: 11, color: t.faint },
     closeBtn: {
       fontFamily: mono, fontSize: 11, color: t.text, background: t.btn,
@@ -640,10 +869,14 @@ function makeStyles(mode: ThemeMode): Styles {
       color: t.faint, fontFamily: mono, fontSize: 13, zIndex: 2, pointerEvents: 'none',
     },
     ask: {
-      position: 'absolute', left: 20, top: 64, zIndex: 3, width: 300,
-      maxHeight: 'calc(100vh - 200px)', overflowY: 'auto',
+      position: 'absolute', left: 20, top: 64, bottom: 20, zIndex: 3, width: 300,
+      overflowY: 'auto',
       background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8, padding: 14,
       fontFamily: mono, color: t.text, boxShadow: t.shadow,
+    },
+    schema: {
+      marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 10,
+      display: 'flex', flexDirection: 'column', gap: 6,
     },
     askHead: { fontSize: 11, letterSpacing: '.14em', color: t.muted, display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
     askLive: { fontSize: 10, letterSpacing: '.06em' },
@@ -656,6 +889,14 @@ function makeStyles(mode: ThemeMode): Styles {
       width: 34, background: t.btn, border: `1px solid ${t.accentDim}`, borderRadius: 4,
       color: t.accent, cursor: 'pointer', fontSize: 14,
     },
+    filterChips: { display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+    chip: {
+      display: 'inline-flex', alignItems: 'center', gap: 6, background: t.btn,
+      border: `1px solid ${t.border}`, borderRadius: 20, padding: '4px 10px',
+      color: t.text2, cursor: 'pointer', fontFamily: mono, fontSize: 10.5,
+    },
+    chipDot: { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 },
+    filterDivider: { borderTop: `1px solid ${t.border}`, margin: '12px 0' },
     presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10 },
     presetChip: {
       textAlign: 'left', background: t.btn, border: `1px solid ${t.border}`, borderRadius: 4,
@@ -694,6 +935,12 @@ function makeStyles(mode: ThemeMode): Styles {
     },
     legendDot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
     legendArrow: { width: 9, textAlign: 'center', fontWeight: 700, display: 'inline-block' },
+    legendCount: { marginLeft: 'auto', paddingLeft: 10, color: t.faint, fontVariantNumeric: 'tabular-nums' },
+    browserBtn: {
+      marginTop: 10, display: 'block', textAlign: 'center', textDecoration: 'none',
+      background: t.btn, border: '1px solid #34d39955', borderRadius: 4, padding: '6px 9px',
+      color: '#34d399', fontFamily: mono, fontSize: 10.5, cursor: 'pointer',
+    },
 
     stats: {
       position: 'absolute', right: 20, top: 64, zIndex: 3, width: 230,
@@ -719,6 +966,22 @@ function makeStyles(mode: ThemeMode): Styles {
       maxHeight: 'calc(100vh - 320px)', overflowY: 'auto',
       background: t.card, border: '1px solid', borderRadius: 8, padding: '14px 16px',
       fontFamily: mono, color: t.text,
+    },
+    actions: { marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 },
+    actionLinks: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+    actionBtn: {
+      display: 'inline-block', background: t.btn, border: `1px solid ${t.border}`, borderRadius: 4,
+      padding: '5px 9px', color: t.text2, fontFamily: mono, fontSize: 10.5, textDecoration: 'none', cursor: 'pointer',
+    },
+    statusRow: { display: 'flex', alignItems: 'center', gap: 8 },
+    statusLabel: { fontSize: 9, letterSpacing: '.12em', color: t.faint, textTransform: 'uppercase' },
+    statusSelect: {
+      flex: 1, background: t.solid, border: '1px solid', borderRadius: 4, padding: '5px 7px',
+      fontFamily: mono, fontSize: 11, cursor: 'pointer', outline: 'none',
+    },
+    openDetailBtn: {
+      width: '100%', background: t.btn, border: `1px solid ${t.accentDim}`, borderRadius: 4,
+      padding: '7px 9px', color: t.accent, fontFamily: mono, fontSize: 11, cursor: 'pointer',
     },
     connections: { marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 10 },
     connHead: { fontSize: 9, letterSpacing: '.1em', color: t.faint, marginBottom: 6 },

@@ -15,10 +15,13 @@ LOAD CSV WITH HEADERS FROM $csv_base + '/venues.csv' AS row
 MERGE (v:Venue {venue_id: row.venue_id})
 SET v.name = row.name, v.category = row.category, v.district = row.district;
 
-// contacts.csv: contact_id,role,verified,venue_id,source
+// contacts.csv: contact_id,contact_name,title,role,verified,venue_id,source
 LOAD CSV WITH HEADERS FROM $csv_base + '/contacts.csv' AS row
 MERGE (c:Contact {contact_id: row.contact_id})
-SET c.role = row.role, c.verified = toBoolean(row.verified);
+SET c.role = row.role,
+    c.name = coalesce(row.contact_name, row.person),
+    c.title = row.title,
+    c.verified = toBoolean(row.verified);
 
 // sequences.csv: sequence_id,name,status
 LOAD CSV WITH HEADERS FROM $csv_base + '/sequences.csv' AS row

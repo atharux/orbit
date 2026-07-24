@@ -20,6 +20,37 @@ export function isLiveConfigured(): boolean {
   return Boolean(URI && USER && PASS)
 }
 
+// Host portion of the bolt URI, e.g. "bfc973e5.databases.neo4j.io".
+function auraHost(): string {
+  return /\/\/([^/:?#]+)/.exec(URI ?? '')?.[1] ?? ''
+}
+
+// Aura connection metadata for the HUD — proves "this is a real instance".
+// name comes from an optional VITE_NEO4J_INSTANCE_NAME; id/host/db are derived.
+export function liveInstanceInfo(): {
+  host: string; instanceId: string; database: string; user: string; name?: string
+} | null {
+  if (!isLiveConfigured()) return null
+  const host = auraHost()
+  return {
+    host,
+    instanceId: host.split('.')[0], // Aura's instance id is the first host label
+    database: DB,
+    user: USER!,
+    name: (import.meta.env.VITE_NEO4J_INSTANCE_NAME as string | undefined) || undefined,
+  }
+}
+
+// Deep-link into Neo4j Browser, pre-connected to this Aura instance with an
+// optional query loaded in the editor. Password is never included — Browser
+// prompts for it. Great "open the real database" demo button.
+export function browserDeepLink(cypher?: string): string | null {
+  if (!isLiveConfigured()) return null
+  const params = new URLSearchParams({ connectURL: `neo4j+s://${USER}@${auraHost()}` })
+  if (cypher) { params.set('cmd', 'edit'); params.set('arg', cypher) }
+  return `https://browser.neo4j.io/?${params.toString()}`
+}
+
 const LABEL_TO_KIND: Record<string, NodeKind> = {
   Venue: 'venue', Contact: 'contact', Source: 'source', Sequence: 'sequence',
 }
@@ -33,7 +64,9 @@ function nodeToGraphNode(n: any): GraphNode | null {
     id: n.elementId,
     kind,
     label: p.name ?? p.role ?? p.venue_id ?? p.contact_id ?? kind,
-    sub: p.category ?? p.role ?? p.status ?? undefined,
+    // Contacts: prefer the person's title/role as the sub-line (their position).
+    // The company they work at comes from the WORKS_AT edge, shown in the card.
+    sub: p.category ?? p.title ?? p.role ?? p.status ?? undefined,
     verified: typeof p.verified === 'boolean' ? p.verified : undefined,
     district: p.district ?? undefined,
   }
