@@ -69,6 +69,7 @@ function nodeToGraphNode(n: any): GraphNode | null {
     sub: p.category ?? p.title ?? p.role ?? p.status ?? undefined,
     verified: typeof p.verified === 'boolean' ? p.verified : undefined,
     district: p.district ?? undefined,
+    website: p.website ?? undefined, // now synced full-fidelity — powers the "no website" preset live
   }
 }
 

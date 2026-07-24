@@ -27,6 +27,9 @@ interface Row {
   seqId: string; seqName: string; status: string
   reachable: boolean; contactId: string; verified: boolean; role: string
   source: string | null; srcVerified: boolean
+  // full-fidelity backup fields
+  email: string | null; phone: string | null; website: string | null
+  updatedAt: string; leadJson: string
 }
 
 function toRow(l: Lead): Row {
@@ -37,14 +40,20 @@ function toRow(l: Lead): Row {
     seqId: `seq:${l.status}`, seqName: STATUS_LABEL[l.status], status: l.status,
     reachable, contactId: `contact:${l.id}`, verified, role: l.category || 'contact',
     source: l.source || null, srcVerified: verified && Boolean(l.source),
+    email: l.email || null, phone: l.phone || null, website: l.website || null,
+    updatedAt: l.updated_at || '', leadJson: JSON.stringify(l),
   }
 }
 
-// One venue+sequence per lead, plus TARGETS.
+// One venue+sequence per lead, plus TARGETS. The Venue node now also carries the
+// FULL lead (lead_json) plus queryable fields, so Aura is a complete backup —
+// nothing is lost the way it was when only name/category/district were stored.
 const Q_VENUES = `
 UNWIND $rows AS r
 MERGE (v:Venue {venue_id: r.venueId})
-  SET v.name = r.name, v.category = r.category, v.district = r.district
+  SET v.name = r.name, v.category = r.category, v.district = r.district,
+      v.email = r.email, v.phone = r.phone, v.website = r.website,
+      v.status = r.status, v.updated_at = r.updatedAt, v.lead_json = r.leadJson
 MERGE (s:Sequence {sequence_id: r.seqId})
   SET s.name = r.seqName, s.status = r.status
 MERGE (s)-[:TARGETS]->(v)`
