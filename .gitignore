@@ -19,3 +19,6 @@ __pycache__/
 
 # Private operator brief — for Athar only, never committed or shared
 OPERATOR-BRIEF.md
+
+# Serena MCP local cache
+.serena/

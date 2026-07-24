@@ -50,9 +50,24 @@ async function bulkReplaceLocalApi(leads: Lead[]): Promise<void> {
 export async function listLeads(): Promise<Lead[]> {
   if (storageMode === 'local-api') {
     try {
-      const leads = await loadLocalApi()
-      saveLocal(leads) // warm localStorage cache so data survives a server restart
-      return leads
+      const fileLeads = await loadLocalApi()
+      const cached = loadLocal()
+      // Merge the server (file) with the localStorage cache instead of letting
+      // the file blindly overwrite it. dedupeLeads keeps the newest record per
+      // lead (by updated_at), so edits made while the server was down survive a
+      // reload rather than being clobbered by the stale file.
+      const merged = dedupeLeads([...fileLeads, ...cached])
+      saveLocal(merged) // keep the localStorage mirror current
+      // If the merge added or updated anything the file lacked, push it back so
+      // the two stores converge to the newest of each.
+      if (leadSignature(fileLeads) !== leadSignature(merged)) {
+        try {
+          await bulkReplaceLocalApi(merged)
+        } catch (err) {
+          console.warn('Local API reconcile failed, merged data is in localStorage cache', err)
+        }
+      }
+      return merged
     } catch (err) {
       console.warn('Local API unavailable, using localStorage cache', err)
       return loadLocal()
@@ -139,6 +154,16 @@ export function exportCsv(leads: Lead[], filename = 'leads'): void {
 
 export function leadKey(lead: Pick<Lead, 'name' | 'city'>): string {
   return `${lead.name.trim().toLowerCase()}::${lead.city.trim().toLowerCase()}`
+}
+
+// Order-independent fingerprint of a lead set: which leads exist and how fresh
+// each is. Used to detect whether a merge changed anything vs. the file so we
+// only push back when reconciliation is actually needed.
+function leadSignature(leads: Lead[]): string {
+  return leads
+    .map(l => `${l.id}@${l.updated_at}`)
+    .sort()
+    .join('|')
 }
 
 export function dedupeLeads(leads: Lead[]): Lead[] {
