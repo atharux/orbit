@@ -5,6 +5,7 @@ import { listLeads, saveLead, removeLead, replaceLeads, exportCsv, exportJson, d
 import { loadAllVerticals, addCustomVertical, removeCustomVertical, updateVertical } from './verticals'
 import { pingScraperHealth, setScraperUrlOverride } from './scraper'
 import { loadSettings, saveSettings, type AppSettings } from './settings'
+import { initBackup, isConfigured, backupNow, reconcileFromBackup, backupFolderName } from './backup/fileBackup'
 import { VerticalPicker } from './components/VerticalPicker'
 import { LeadTable } from './components/LeadTable'
 import { ScraperPanel } from './components/ScraperPanel'
@@ -16,6 +17,8 @@ import { SettingsModal } from './components/SettingsModal'
 const GraphOverlay = lazy(() => import('./graph/GraphOverlay').then(m => ({ default: m.GraphOverlay })))
 const AboutExhibit = lazy(() => import('./about/AboutExhibit').then(m => ({ default: m.AboutExhibit })))
 const SequencesPanel = lazy(() => import('./sequences/SequencesPanel').then(m => ({ default: m.SequencesPanel })))
+const ImportModal = lazy(() => import('./import/ImportModal').then(m => ({ default: m.ImportModal })))
+const BackupModal = lazy(() => import('./backup/BackupModal').then(m => ({ default: m.BackupModal })))
 
 // Cheap env check — the actual sync module (pulls neo4j-driver) is lazy-loaded.
 const SYNC_ENABLED = Boolean(
@@ -34,6 +37,9 @@ export function App() {
   const [graphOpen, setGraphOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [sequencesOpen, setSequencesOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [backupOpen, setBackupOpen] = useState(false)
+  const [backupFolder, setBackupFolder] = useState<string | null>(null)
   const [graphSync, setGraphSync] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle')
   const [graphSyncMsg, setGraphSyncMsg] = useState('')
   const syncEnabled = SYNC_ENABLED
@@ -49,8 +55,30 @@ export function App() {
   const activeVertical = verticals.find(v => v.id === activeVerticalId) ?? verticals[0]!
 
   useEffect(() => {
-    listLeads().then(loaded => { setLeads(loaded); setLoading(false) })
+    (async () => {
+      // If a backup folder is configured, reconcile it with local storage FIRST
+      // (newest record wins) so this instance converges to the source of truth.
+      const name = await initBackup().catch(() => null)
+      setBackupFolder(name)
+      if (isConfigured()) { try { await reconcileFromBackup() } catch { /* offline drive, etc. */ } }
+      const loaded = await listLeads()
+      setLeads(loaded); setLoading(false)
+    })()
   }, [])
+
+  // Autosave the whole DB to the backup folder shortly after leads change.
+  useEffect(() => {
+    if (!backupFolder || loading) return
+    const t = setTimeout(() => { backupNow().catch(() => {}) }, 1500)
+    return () => clearTimeout(t)
+  }, [leads, backupFolder, loading])
+
+  // Periodic safety net (also captures sequence edits made in the panel).
+  useEffect(() => {
+    if (!backupFolder) return
+    const iv = setInterval(() => { backupNow().catch(() => {}) }, 60000)
+    return () => clearInterval(iv)
+  }, [backupFolder])
 
   useEffect(() => {
     if (settings.scraperUrl) setScraperUrlOverride(settings.scraperUrl)
@@ -333,6 +361,22 @@ export function App() {
         </button>
         <button
           className="btn btn-ghost"
+          style={{ height: 30, fontSize: 11, letterSpacing: '.04em', color: backupFolder ? undefined : '#f59e0b' }}
+          onClick={() => setBackupOpen(true)}
+          title={backupFolder ? `Backup folder: ${backupFolder}` : 'No backup yet — set a backup drive'}
+        >
+          ⛁ Backup{backupFolder ? ' ✓' : ' !'}
+        </button>
+        <button
+          className="btn btn-ghost"
+          style={{ height: 30, fontSize: 11 }}
+          onClick={() => setImportOpen(true)}
+          title="Import a CSV — staged & deduped before it touches your leads"
+        >
+          Import CSV
+        </button>
+        <button
+          className="btn btn-ghost"
           style={{ height: 30, fontSize: 11 }}
           onClick={() => exportCsv(filteredLeads, `${activeVertical.name.toLowerCase()}-leads`)}
           disabled={filteredLeads.length === 0}
@@ -557,6 +601,27 @@ export function App() {
             onClose={() => setSequencesOpen(false)}
             openRouterApiKey={settings.openRouterApiKey || undefined}
             openRouterModel={settings.openRouterModel !== 'auto' ? settings.openRouterModel : undefined}
+          />
+        </Suspense>
+      )}
+
+      {importOpen && (
+        <Suspense fallback={null}>
+          <ImportModal
+            existingLeads={leads}
+            verticalId={activeVerticalId}
+            verticalName={activeVertical.name}
+            onImport={handleLeadsAdded}
+            onClose={() => setImportOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {backupOpen && (
+        <Suspense fallback={null}>
+          <BackupModal
+            onClose={() => { setBackupFolder(backupFolderName()); setBackupOpen(false) }}
+            onRestored={() => window.location.reload()}
           />
         </Suspense>
       )}
