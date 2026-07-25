@@ -155,7 +155,7 @@ function filterNodeIds(
     .map(n => n.id)
 }
 
-export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel, onLeadStatusChange, onOpenLead }: {
+export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel, onLeadStatusChange, onOpenLead, onBulkEnrich }: {
   leads: Lead[]
   onClose: () => void
   openRouterApiKey?: string
@@ -166,6 +166,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // Jump from a company/contact node to its full lead-detail panel in the main
   // app (closes the graph). Optional — only shown for nodes backed by a lead.
   onOpenLead?: (leadId: string) => void
+  // Bulk-enrich the selected leads (fills blank email/phone/website via scraper).
+  onBulkEnrich?: (leadIds: string[]) => Promise<{ updated: number; failed: number }>
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<any>(null)
@@ -178,6 +180,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [selected, setSelected] = useState<GraphNode | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([]) // multi-selection for bulk actions
   const [bulkMsg, setBulkMsg] = useState('')
+  const [enriching, setEnriching] = useState(false)
   const [errMsg, setErrMsg] = useState('')
   const [graphData, setGraphData] = useState<GraphData | null>(null)
 
@@ -886,6 +889,21 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               {loadSequences().map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               <option value="__new">+ New sequence</option>
             </select>
+          )}
+          {onBulkEnrich && selectedLeads.length > 0 && (
+            <button
+              style={styles.bulkBtn}
+              disabled={enriching}
+              onClick={async () => {
+                setEnriching(true); setBulkMsg('Enriching…')
+                try {
+                  const r = await onBulkEnrich(selectedLeads.map(l => l.id))
+                  setBulkMsg(`Enriched ${r.updated}${r.failed ? ` · ${r.failed} failed` : ''}`)
+                } catch { setBulkMsg('Enrich failed') } finally { setEnriching(false) }
+              }}
+            >
+              {enriching ? 'Enriching…' : 'Enrich ✦'}
+            </button>
           )}
           <button style={styles.bulkBtn} onClick={bulkExport}>Export ↓</button>
           <button style={styles.bulkClear} onClick={clearSelection}>Clear</button>

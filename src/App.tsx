@@ -3,7 +3,7 @@ import type { Lead, Vertical, OutreachStatus } from './types'
 import { STATUSES, STATUS_LABEL, STATUS_COLOR } from './types'
 import { listLeads, saveLead, removeLead, replaceLeads, exportCsv, exportJson, dedupeLeads } from './storage'
 import { loadAllVerticals, addCustomVertical, removeCustomVertical, updateVertical } from './verticals'
-import { pingScraperHealth, setScraperUrlOverride } from './scraper'
+import { pingScraperHealth, setScraperUrlOverride, enrichLead } from './scraper'
 import { loadSettings, saveSettings, type AppSettings } from './settings'
 import { initBackup, isConfigured, backupNow, reconcileFromBackup, backupFolderName } from './backup/fileBackup'
 import { VerticalPicker } from './components/VerticalPicker'
@@ -40,6 +40,7 @@ export function App() {
   const [importOpen, setImportOpen] = useState(false)
   const [backupOpen, setBackupOpen] = useState(false)
   const [backupFolder, setBackupFolder] = useState<string | null>(null)
+  const [bulkEnriching, setBulkEnriching] = useState(false)
   const [graphSync, setGraphSync] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle')
   const [graphSyncMsg, setGraphSyncMsg] = useState('')
   const syncEnabled = SYNC_ENABLED
@@ -199,6 +200,41 @@ export function App() {
     setSelectedLead(updated)
     await saveLead(updated, next)
     pushToGraph([updated])
+  }
+
+  // Bulk enrichment — fill blank website/email/phone/instagram via the scraper.
+  // Only fills gaps (never overwrites existing values); persists + re-syncs.
+  async function handleEnrich(leadIds: string[]): Promise<{ updated: number; failed: number }> {
+    let updated = 0, failed = 0
+    const next = [...leads]
+    for (const id of leadIds) {
+      const idx = next.findIndex(l => l.id === id)
+      if (idx < 0) continue
+      const lead = next[idx]
+      try {
+        const r = await enrichLead(
+          { name: lead.name, city: lead.city, website: lead.website, instagram: lead.instagram, email: lead.email, phone: lead.phone, notes: lead.notes },
+          aiOptions,
+        )
+        const merged: Lead = {
+          ...lead,
+          website: lead.website || r.website || undefined,
+          email: lead.email || r.email || undefined,
+          phone: lead.phone || r.phone || undefined,
+          instagram: lead.instagram || r.instagram || undefined,
+          updated_at: new Date().toISOString(),
+        }
+        if (merged.website !== lead.website || merged.email !== lead.email || merged.phone !== lead.phone || merged.instagram !== lead.instagram) {
+          next[idx] = merged; updated++
+        }
+      } catch { failed++ }
+    }
+    if (updated) {
+      setLeads(next)
+      await replaceLeads(next)
+      pushToGraph(next.filter(l => leadIds.includes(l.id)))
+    }
+    return { updated, failed }
   }
 
   async function handleLeadDelete(id: string) {
@@ -488,6 +524,15 @@ export function App() {
             {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
           </select>
           <button className="btn btn-ghost" style={{ height: 28, fontSize: 11 }}
+            disabled={bulkEnriching}
+            title="Fill blank email/phone/website for the selected leads"
+            onClick={async () => {
+              setBulkEnriching(true)
+              try { await handleEnrich([...selectedIds]) } finally { setBulkEnriching(false) }
+            }}>
+            {bulkEnriching ? 'Enriching…' : `✦ Enrich ${selectedIds.size}`}
+          </button>
+          <button className="btn btn-ghost" style={{ height: 28, fontSize: 11 }}
             onClick={() => setSelectedIds(new Set(filteredLeads.map(l => l.id)))}>
             Select all {filteredLeads.length}
           </button>
@@ -580,6 +625,7 @@ export function App() {
             openRouterApiKey={settings.openRouterApiKey || undefined}
             openRouterModel={settings.openRouterModel !== 'auto' ? settings.openRouterModel : undefined}
             onLeadStatusChange={handleStatusChange}
+            onBulkEnrich={handleEnrich}
             onOpenLead={(id) => {
               const l = leads.find(x => x.id === id)
               if (l) { setGraphOpen(false); setSelectedLead(l) }
