@@ -6,6 +6,7 @@ import { loadAllVerticals, addCustomVertical, removeCustomVertical, updateVertic
 import { pingScraperHealth, setScraperUrlOverride, enrichLead } from './scraper'
 import { loadSettings, saveSettings, type AppSettings } from './settings'
 import { initBackup, isConfigured, backupNow, reconcileFromBackup, backupFolderName } from './backup/fileBackup'
+import { loadSequences, saveSequences, enrollLeads } from './sequences/store'
 import { VerticalPicker } from './components/VerticalPicker'
 import { LeadTable } from './components/LeadTable'
 import { ScraperPanel } from './components/ScraperPanel'
@@ -212,6 +213,7 @@ export function App() {
   async function handleEnrich(leadIds: string[]): Promise<{ updated: number; failed: number }> {
     let updated = 0, failed = 0
     const next = [...leads]
+    const becameReachable: string[] = [] // gained an email this pass
     for (const id of leadIds) {
       const idx = next.findIndex(l => l.id === id)
       if (idx < 0) continue
@@ -221,16 +223,20 @@ export function App() {
           { name: lead.name, city: lead.city, website: lead.website, instagram: lead.instagram, email: lead.email, phone: lead.phone, notes: lead.notes },
           aiOptions,
         )
+        const gainedEmail = !lead.email && Boolean(r.email)
         const merged: Lead = {
           ...lead,
           website: lead.website || r.website || undefined,
           email: lead.email || r.email || undefined,
           phone: lead.phone || r.phone || undefined,
           instagram: lead.instagram || r.instagram || undefined,
+          // Automation: advance a fresh lead to "ready" once it's reachable.
+          status: gainedEmail && settings.autoAdvance && lead.status === 'new' ? 'ready' : lead.status,
           updated_at: new Date().toISOString(),
         }
-        if (merged.website !== lead.website || merged.email !== lead.email || merged.phone !== lead.phone || merged.instagram !== lead.instagram) {
+        if (merged.website !== lead.website || merged.email !== lead.email || merged.phone !== lead.phone || merged.instagram !== lead.instagram || merged.status !== lead.status) {
           next[idx] = merged; updated++
+          if (gainedEmail) becameReachable.push(id)
         }
       } catch { failed++ }
     }
@@ -238,6 +244,15 @@ export function App() {
       setLeads(next)
       await replaceLeads(next)
       pushToGraph(next.filter(l => leadIds.includes(l.id)))
+    }
+    // Automation: auto-enroll newly-reachable leads into the chosen default sequence.
+    if (becameReachable.length && settings.autoEnrollSeqId) {
+      const seqs = loadSequences()
+      const target = seqs.find(sq => sq.id === settings.autoEnrollSeqId)
+      if (target) {
+        const up = enrollLeads(target, becameReachable)
+        saveSequences(seqs.map(sq => (sq.id === up.id ? up : sq)))
+      }
     }
     return { updated, failed }
   }

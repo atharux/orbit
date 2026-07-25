@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { type AppSettings, FREE_MODELS } from '../settings'
+import { loadSequences } from '../sequences/store'
 
 interface Props {
   initial: AppSettings
@@ -91,13 +92,34 @@ export function SettingsModal({ initial, onSave, onClose }: Props) {
           </div>
 
           {/* Automation */}
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-              <input type="checkbox" checked={s.autoEnrich} onChange={e => set('autoEnrich', e.target.checked)} />
-              <span className="field-label" style={{ margin: 0 }}>Auto-enrich new leads</span>
-            </label>
-            <div className="text-faint" style={{ fontSize: 11, marginTop: 4, textTransform: 'none', letterSpacing: 0 }}>
-              Fills blank email/phone/website automatically when leads are discovered or imported.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={s.autoEnrich} onChange={e => set('autoEnrich', e.target.checked)} />
+                <span className="field-label" style={{ margin: 0 }}>Auto-enrich new leads</span>
+              </label>
+              <div className="text-faint" style={{ fontSize: 11, marginTop: 4, textTransform: 'none', letterSpacing: 0 }}>
+                Fills blank email/phone/website automatically when leads are discovered or imported.
+              </div>
+            </div>
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={s.autoAdvance} onChange={e => set('autoAdvance', e.target.checked)} />
+                <span className="field-label" style={{ margin: 0 }}>Auto-advance to “Ready” when reachable</span>
+              </label>
+              <div className="text-faint" style={{ fontSize: 11, marginTop: 4, textTransform: 'none', letterSpacing: 0 }}>
+                A “New” lead becomes “Ready to contact” the moment enrichment finds an email.
+              </div>
+            </div>
+            <div>
+              <div className="field-label">Auto-enroll reachable leads into</div>
+              <select className="field-input" value={s.autoEnrollSeqId} onChange={e => set('autoEnrollSeqId', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>
+                <option value="">— off —</option>
+                {loadSequences().map(seq => <option key={seq.id} value={seq.id}>{seq.name}</option>)}
+              </select>
+              <div className="text-faint" style={{ fontSize: 11, marginTop: 4, textTransform: 'none', letterSpacing: 0 }}>
+                When a lead gains an email, drop it straight into this sequence. Hands-off funnel.
+              </div>
             </div>
           </div>
 

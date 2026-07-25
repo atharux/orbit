@@ -5,6 +5,8 @@ export interface AppSettings {
   openRouterModel: string
   scraperUrl: string
   autoEnrich: boolean // auto-fill email/phone/website for newly added leads
+  autoAdvance: boolean // bump status new -> ready when a lead gains an email
+  autoEnrollSeqId: string // sequence id to auto-enroll newly-reachable leads into ('' = off)
 }
 
 export const FREE_MODELS = [
@@ -21,6 +23,8 @@ const DEFAULTS: AppSettings = {
   openRouterModel: 'auto',
   scraperUrl: '',
   autoEnrich: true,
+  autoAdvance: true,
+  autoEnrollSeqId: '',
 }
 
 export function loadSettings(): AppSettings {
