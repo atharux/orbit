@@ -4,6 +4,7 @@ export interface AppSettings {
   openRouterApiKey: string
   openRouterModel: string
   scraperUrl: string
+  autoEnrich: boolean // auto-fill email/phone/website for newly added leads
 }
 
 export const FREE_MODELS = [
@@ -19,6 +20,7 @@ const DEFAULTS: AppSettings = {
   openRouterApiKey: import.meta.env.VITE_OPENROUTER_API_KEY ?? '',
   openRouterModel: 'auto',
   scraperUrl: '',
+  autoEnrich: true,
 }
 
 export function loadSettings(): AppSettings {

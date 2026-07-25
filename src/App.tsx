@@ -192,6 +192,11 @@ export function App() {
     setLeads(all)
     for (const lead of newLeads) await saveLead(lead, all)
     pushToGraph(newLeads)
+    // Automation: fill blank contact details on new leads in the background.
+    if (settings.autoEnrich && newLeads.length) {
+      setBulkEnriching(true)
+      handleEnrich(newLeads.map(l => l.id)).finally(() => setBulkEnriching(false))
+    }
   }
 
   async function handleLeadUpdate(updated: Lead) {

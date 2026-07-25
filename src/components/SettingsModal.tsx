@@ -90,6 +90,17 @@ export function SettingsModal({ initial, onSave, onClose }: Props) {
             />
           </div>
 
+          {/* Automation */}
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={s.autoEnrich} onChange={e => set('autoEnrich', e.target.checked)} />
+              <span className="field-label" style={{ margin: 0 }}>Auto-enrich new leads</span>
+            </label>
+            <div className="text-faint" style={{ fontSize: 11, marginTop: 4, textTransform: 'none', letterSpacing: 0 }}>
+              Fills blank email/phone/website automatically when leads are discovered or imported.
+            </div>
+          </div>
+
           {/* Status */}
           <div style={{ padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
             <div className="field-label" style={{ marginBottom: 6 }}>Current config</div>
