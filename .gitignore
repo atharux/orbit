@@ -22,3 +22,7 @@ OPERATOR-BRIEF.md
 
 # Serena MCP local cache
 .serena/
+
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/gen/
