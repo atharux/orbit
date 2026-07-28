@@ -283,9 +283,15 @@ export function categoryDisplayName(cat: string): string {
   return parseOsmCategory(cat).value.replace(/_/g, ' ')
 }
 
+// Nominatim serves its responses through a Varnish cache that does not vary on
+// Origin, so a cached entry stored for a request without one comes back with no
+// access-control-allow-origin header and the webview rejects it. Routing through
+// httpFetch sidesteps that on desktop — and makes the User-Agent below actually
+// take effect, since browsers silently drop that header but Rust does not.
+// Nominatim's usage policy requires an identifying User-Agent.
 async function nominatimGeocode(location: string): Promise<{ lat: number; lng: number } | null> {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`
-  const res = await fetch(url, {
+  const res = await httpFetch(url, {
     headers: { 'User-Agent': 'PocketLeads/1.0 (athar@atharux.com)' },
   })
   if (!res.ok) return null
