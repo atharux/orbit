@@ -6,8 +6,8 @@ import type { GraphData, GraphNode, GraphLink, NodeKind, LinkKind } from './type
 // "demo agent stays read-only" guardrail.
 //
 // NOTE: putting Aura creds in VITE_ vars ships them in the browser bundle. Fine
-// for a hackathon with a throwaway read-only user; for anything public, move
-// this query behind local-api-server.mjs instead. See GRAPHRAG.md.
+// for a hackathon with a throwaway read-only user; for anything public, this
+// query needs to move server-side. See GRAPHRAG.md.
 
 const URI = import.meta.env.VITE_NEO4J_URI as string | undefined
 const USER = import.meta.env.VITE_NEO4J_USERNAME as string | undefined

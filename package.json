@@ -8,8 +8,6 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "local-api": "node local-api-server.mjs",
-    "local-api:hd": "LEAD_DB_PATH=/Volumes/1a1/pocket-leads/leads.db node local-api-server.mjs",
     "tauri": "tauri",
     "tauri:build": "tauri build"
   },
@@ -17,7 +15,6 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "3d-force-graph": "^1.80.0",
-    "better-sqlite3": "^11.10.0",
     "neo4j-driver-lite": "^6.2.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -31,6 +28,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^6.0.1",
+    "better-sqlite3": "^11.10.0",
     "typescript": "~6.0.2",
     "vite": "^8.0.12"
   }
