@@ -7,6 +7,12 @@
   ],
   "permissions": [
     "core:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://venue-scraper.athar-hafiz.workers.dev/*" }
+      ]
+    }
   ]
 }

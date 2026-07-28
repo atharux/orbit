@@ -51,6 +51,11 @@ export function App() {
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [scraperStatus, setScraperStatus] = useState<'checking' | 'connected' | 'unavailable'>('checking')
+  // pingScraperHealth() already reports why it failed; surfacing it in the
+  // status tooltip is the only way to diagnose a release build, which has no
+  // devtools. "scraper offline" with no reason is how the CORS failure stayed
+  // invisible for so long.
+  const [scraperError, setScraperError] = useState('')
   const [loading, setLoading] = useState(true)
   const [editTrigger, setEditTrigger] = useState(0)
 
@@ -84,7 +89,10 @@ export function App() {
 
   useEffect(() => {
     if (settings.scraperUrl) setScraperUrlOverride(settings.scraperUrl)
-    pingScraperHealth().then(h => setScraperStatus(h.status === 'connected' ? 'connected' : 'unavailable'))
+    pingScraperHealth().then(h => {
+      setScraperStatus(h.status === 'connected' ? 'connected' : 'unavailable')
+      setScraperError(h.status === 'connected' ? '' : (h.error ?? ''))
+    })
   }, [settings.scraperUrl])
 
   useEffect(() => {
@@ -335,7 +343,10 @@ export function App() {
     setSettings(s)
     setScraperUrlOverride(s.scraperUrl)
     setScraperStatus('checking')
-    pingScraperHealth().then(h => setScraperStatus(h.status === 'connected' ? 'connected' : 'unavailable'))
+    pingScraperHealth().then(h => {
+      setScraperStatus(h.status === 'connected' ? 'connected' : 'unavailable')
+      setScraperError(h.status === 'connected' ? '' : (h.error ?? ''))
+    })
   }
 
   const spotStyle = {
@@ -358,7 +369,7 @@ export function App() {
           <span style={{ color: 'var(--faint)', fontWeight: 400 }}>LEAD ENGINE</span>
         </div>
         <div className="header-spacer" />
-        <div className={`header-status ${scraperStatus}`}>
+        <div className={`header-status ${scraperStatus}`} title={scraperError || undefined}>
           <div className="dot-sm" />
           <span className="mono" style={{ fontSize: 10 }}>
             {scraperStatus === 'checking' ? 'connecting...' : scraperStatus === 'connected' ? 'scraper online' : 'scraper offline'}

@@ -97,6 +97,11 @@ fn backup_remove(dir: String, name: String) -> Result<(), String> {
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    // Lets the scraper client issue requests from Rust instead of the webview.
+    // The shared worker only sends CORS headers for https://venues.atharux.com,
+    // so a direct fetch from a tauri:// origin is blocked by WKWebView — see
+    // the transport note in src/scraper.ts.
+    .plugin(tauri_plugin_http::init())
     .invoke_handler(tauri::generate_handler![
       backup_dir_available,
       backup_read,
