@@ -1,9 +1,16 @@
 import type { Lead } from './types'
 
-const LS_KEY = 'pocket-leads:v1'
-const LEAD_API_URL = import.meta.env.VITE_LEAD_API_URL as string | undefined
+// Leads live in localStorage; the durable copy is the JSON backup file the user
+// points at a folder or drive (src/backup/fileBackup.ts).
+//
+// There used to be a second path here — a Node SQLite server behind
+// VITE_LEAD_API_URL — but nothing could reach it. The packaged app ships that
+// var blank and has no way to launch the server, so every call fell through to
+// the localStorage branch anyway. It read like a live storage backend while
+// being dead code, which made storage bugs genuinely confusing to diagnose.
+// localStorage plus the backup file is the whole story.
 
-export const storageMode: 'local-api' | 'localStorage' = LEAD_API_URL ? 'local-api' : 'localStorage'
+const LS_KEY = 'pocket-leads:v1'
 
 // ---------- localStorage ----------
 
@@ -24,90 +31,25 @@ function saveLocal(leads: Lead[]): void {
   }
 }
 
-// ---------- local-api (SQLite) ----------
-
-function apiUrl(path: string): string {
-  return `${(LEAD_API_URL ?? '').replace(/\/$/, '')}${path}`
-}
-
-async function loadLocalApi(): Promise<Lead[]> {
-  const res = await fetch(apiUrl('/leads'))
-  if (!res.ok) throw new Error(`Local API ${res.status}: ${await res.text()}`)
-  return res.json() as Promise<Lead[]>
-}
-
-async function bulkReplaceLocalApi(leads: Lead[]): Promise<void> {
-  const res = await fetch(apiUrl('/leads/bulk'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ leads }),
-  })
-  if (!res.ok) throw new Error(`Local API ${res.status}: ${await res.text()}`)
-}
-
 // ---------- unified API ----------
+// Async signatures are kept even though localStorage is synchronous: callers in
+// App.tsx await these, and the backup layer they feed is genuinely async.
 
 export async function listLeads(): Promise<Lead[]> {
-  if (storageMode === 'local-api') {
-    try {
-      const fileLeads = await loadLocalApi()
-      const cached = loadLocal()
-      // Merge the server (file) with the localStorage cache instead of letting
-      // the file blindly overwrite it. dedupeLeads keeps the newest record per
-      // lead (by updated_at), so edits made while the server was down survive a
-      // reload rather than being clobbered by the stale file.
-      const merged = dedupeLeads([...fileLeads, ...cached])
-      saveLocal(merged) // keep the localStorage mirror current
-      // If the merge added or updated anything the file lacked, push it back so
-      // the two stores converge to the newest of each.
-      if (leadSignature(fileLeads) !== leadSignature(merged)) {
-        try {
-          await bulkReplaceLocalApi(merged)
-        } catch (err) {
-          console.warn('Local API reconcile failed, merged data is in localStorage cache', err)
-        }
-      }
-      return merged
-    } catch (err) {
-      console.warn('Local API unavailable, using localStorage cache', err)
-      return loadLocal()
-    }
-  }
   return loadLocal()
 }
 
 export async function saveLead(lead: Lead, allLeads: Lead[]): Promise<Lead> {
-  saveLocal(allLeads) // always keep localStorage in sync as a backup
-  if (storageMode === 'local-api') {
-    try {
-      await bulkReplaceLocalApi(allLeads)
-    } catch (err) {
-      console.warn('Local API save failed, data is in localStorage cache', err)
-    }
-  }
+  saveLocal(allLeads)
   return lead
 }
 
 export async function removeLead(_id: string, allLeads: Lead[]): Promise<void> {
   saveLocal(allLeads)
-  if (storageMode === 'local-api') {
-    try {
-      await bulkReplaceLocalApi(allLeads)
-    } catch (err) {
-      console.warn('Local API remove failed, data is in localStorage cache', err)
-    }
-  }
 }
 
 export async function replaceLeads(leads: Lead[]): Promise<void> {
   saveLocal(leads)
-  if (storageMode === 'local-api') {
-    try {
-      await bulkReplaceLocalApi(leads)
-    } catch (err) {
-      console.warn('Local API replace failed, data is in localStorage cache', err)
-    }
-  }
 }
 
 export function exportJson(leads: Lead[], filename = 'leads'): void {
@@ -154,16 +96,6 @@ export function exportCsv(leads: Lead[], filename = 'leads'): void {
 
 export function leadKey(lead: Pick<Lead, 'name' | 'city'>): string {
   return `${lead.name.trim().toLowerCase()}::${lead.city.trim().toLowerCase()}`
-}
-
-// Order-independent fingerprint of a lead set: which leads exist and how fresh
-// each is. Used to detect whether a merge changed anything vs. the file so we
-// only push back when reconciliation is actually needed.
-function leadSignature(leads: Lead[]): string {
-  return leads
-    .map(l => `${l.id}@${l.updated_at}`)
-    .sort()
-    .join('|')
 }
 
 export function dedupeLeads(leads: Lead[]): Lead[] {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  backupSupported, backupFolderName, lastBackupAt,
+  backupSupported, backupFolderName, backupFolderPath, backupTargetAvailable, lastBackupAt,
   pickBackupFolder, backupNow, readLatestBackup, restoreDb, forgetBackupFolder,
 } from './fileBackup'
 
@@ -10,18 +10,32 @@ import {
 export function BackupModal({ onClose, onRestored }: { onClose: () => void; onRestored: () => void }) {
   const supported = backupSupported()
   const [folder, setFolder] = useState<string | null>(backupFolderName())
+  const [folderPath, setFolderPath] = useState<string | null>(backupFolderPath())
   const [last, setLast] = useState<string | null>(lastBackupAt())
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
+  // null = not checked yet; false = the folder is gone (drive unplugged).
+  const [driveOk, setDriveOk] = useState<boolean | null>(null)
 
-  useEffect(() => { setFolder(backupFolderName()); setLast(lastBackupAt()) }, [])
+  useEffect(() => { setFolder(backupFolderName()); setFolderPath(backupFolderPath()); setLast(lastBackupAt()) }, [])
+
+  // A configured folder on an external drive can vanish between sessions —
+  // check rather than letting every autosave fail silently in the background.
+  useEffect(() => {
+    if (!folder) { setDriveOk(null); return }
+    let live = true
+    backupTargetAvailable().then(ok => { if (live) setDriveOk(ok) }).catch(() => { if (live) setDriveOk(false) })
+    return () => { live = false }
+  }, [folder])
 
   async function choose() {
     setErr(''); setMsg(''); setBusy('picking')
     try {
       const name = await pickBackupFolder()
       setFolder(name)
+      setFolderPath(backupFolderPath())
+      setDriveOk(true)
       const res = await backupNow()
       setLast(res.savedAt)
       setMsg(`Backup folder set to "${name}". Saved ${res.rows} leads.`)
@@ -52,7 +66,8 @@ export function BackupModal({ onClose, onRestored }: { onClose: () => void; onRe
   }
 
   async function forget() {
-    await forgetBackupFolder(); setFolder(null); setMsg('Backup folder disconnected (your file is untouched).')
+    await forgetBackupFolder(); setFolder(null); setFolderPath(null); setDriveOk(null)
+    setMsg('Backup folder disconnected (your file is untouched).')
   }
 
   const s = styles
@@ -68,7 +83,14 @@ export function BackupModal({ onClose, onRestored }: { onClose: () => void; onRe
         <div style={s.body}>
           {!supported && (
             <div style={s.warn}>
-              This browser doesn't support folder backup (needs Chrome/Edge). Use <b>Export JSON</b> in the header as a manual backup instead.
+              This browser doesn't support folder backup (needs Chrome/Edge, or the Orbit desktop app). Use <b>Export JSON</b> in the header as a manual backup instead.
+            </div>
+          )}
+
+          {supported && folder && driveOk === false && (
+            <div style={{ ...s.warn, marginBottom: 14 }}>
+              <b>Backup folder not found.</b> {folderPath ? <code>{folderPath}</code> : `"${folder}"`} isn't
+              reachable — if it's on an external drive, plug the drive in. Autosaves are failing until it's back.
             </div>
           )}
 
@@ -79,6 +101,12 @@ export function BackupModal({ onClose, onRestored }: { onClose: () => void; onRe
                   <span style={s.statusKey}>Backup folder</span>
                   <span style={s.statusVal}>{folder ? `📁 ${folder}` : <span style={s.dim}>not set</span>}</span>
                 </div>
+                {folderPath && (
+                  <div style={s.statusRow}>
+                    <span style={s.statusKey}>Path</span>
+                    <span style={{ ...s.statusVal, fontSize: 11, color: '#94a3b8', wordBreak: 'break-all', textAlign: 'right' }}>{folderPath}</span>
+                  </div>
+                )}
                 <div style={s.statusRow}>
                   <span style={s.statusKey}>Last backup</span>
                   <span style={s.statusVal}>{last ? new Date(last).toLocaleString() : <span style={s.dim}>never</span>}</span>

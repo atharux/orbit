@@ -6,6 +6,42 @@ import type { ScrapeResult } from './types'
 const SCRAPER_URL = import.meta.env.VITE_SCRAPER_URL as string | undefined
 const FALLBACK_WORKER_URL = 'https://venue-scraper.athar-hafiz.workers.dev'
 
+// ---------- transport ----------
+// The worker only sends CORS headers for https://venues.atharux.com, so a
+// direct fetch from the webview fails everywhere except production. In dev the
+// Vite proxy hides that (see getScraperBases). The packaged desktop app has no
+// proxy and its origin is tauri://localhost, so every request was blocked —
+// the scraper simply never worked there.
+//
+// Fix: on desktop, issue the request from Rust via tauri-plugin-http, where
+// CORS does not apply. Relative URLs stay on window.fetch (they only occur
+// under the dev proxy, which the Rust client cannot resolve).
+
+function isTauri(): boolean {
+  return typeof (window as any).__TAURI_INTERNALS__ !== 'undefined'
+}
+
+type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
+
+let _tauriFetch: FetchFn | null = null
+
+async function httpFetch(url: string, init?: RequestInit): Promise<Response> {
+  if (!isTauri() || url.startsWith('/')) return fetch(url, init)
+  if (!_tauriFetch) {
+    const mod = await import('@tauri-apps/plugin-http')
+    _tauriFetch = mod.fetch as unknown as FetchFn
+  }
+  try {
+    return await _tauriFetch(url, init)
+  } catch (err) {
+    // The HTTP scope in capabilities/default.json only allows the known worker.
+    // A user-configured scraperUrl lands here; fall back to the webview so the
+    // Settings override degrades to "needs CORS" rather than silently dying.
+    console.warn('Tauri HTTP transport refused, falling back to webview fetch', err)
+    return fetch(url, init)
+  }
+}
+
 // No localhost fallback — 8787 is reserved for the local leads API.
 // Runtime override via settings.scraperUrl takes highest priority.
 let _scraperUrlOverride: string | null = null
@@ -44,7 +80,7 @@ export async function pingScraperHealth(timeoutMs = 2500): Promise<ScraperHealth
     try {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
-      const res = await fetch(`${base.replace(/\/$/, '')}/health`, {
+      const res = await httpFetch(`${base.replace(/\/$/, '')}/health`, {
         method: 'GET',
         signal: controller.signal,
       })
@@ -99,7 +135,7 @@ async function resolveBase(): Promise<string> {
     try {
       const controller = new AbortController()
       setTimeout(() => controller.abort(), 2000)
-      const res = await fetch(`${base.replace(/\/$/, '')}/health`, { signal: controller.signal })
+      const res = await httpFetch(`${base.replace(/\/$/, '')}/health`, { signal: controller.signal })
       if (res.ok) { _activeBase = base; return base }
     } catch { /* try next */ }
   }
@@ -109,7 +145,7 @@ async function resolveBase(): Promise<string> {
 async function requestJson<T>(path: string, body: Record<string, unknown>, options?: AiScraperOptions): Promise<T> {
   const base = await resolveBase()
   const url = `${base.replace(/\/$/, '')}${path}`
-  const res = await fetch(url, {
+  const res = await httpFetch(url, {
     method: 'POST',
     headers: withAiHeaders({ 'Content-Type': 'application/json' }, options),
     body: JSON.stringify(body),
@@ -247,9 +283,15 @@ export function categoryDisplayName(cat: string): string {
   return parseOsmCategory(cat).value.replace(/_/g, ' ')
 }
 
+// Nominatim serves its responses through a Varnish cache that does not vary on
+// Origin, so a cached entry stored for a request without one comes back with no
+// access-control-allow-origin header and the webview rejects it. Routing through
+// httpFetch sidesteps that on desktop — and makes the User-Agent below actually
+// take effect, since browsers silently drop that header but Rust does not.
+// Nominatim's usage policy requires an identifying User-Agent.
 async function nominatimGeocode(location: string): Promise<{ lat: number; lng: number } | null> {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`
-  const res = await fetch(url, {
+  const res = await httpFetch(url, {
     headers: { 'User-Agent': 'PocketLeads/1.0 (athar@atharux.com)' },
   })
   if (!res.ok) return null

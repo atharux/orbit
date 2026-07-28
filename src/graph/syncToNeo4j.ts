@@ -11,7 +11,8 @@ import { STATUS_LABEL } from '../types'
 //   status            -> Sequence  (seq:<status>)   Contact ENROLLED_IN, Sequence TARGETS venue
 //
 // This is a WRITE path using the VITE_NEO4J_* creds (browser). Fine for a local
-// Aura Free demo; for production route it through local-api-server.mjs instead.
+// Aura Free demo; for production it needs to run behind a server the creds
+// never leave.
 
 const URI = import.meta.env.VITE_NEO4J_URI as string | undefined
 const USER = import.meta.env.VITE_NEO4J_USERNAME as string | undefined

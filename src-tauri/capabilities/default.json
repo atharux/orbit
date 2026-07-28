@@ -6,6 +6,14 @@
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "dialog:allow-open",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://venue-scraper.athar-hafiz.workers.dev/*" },
+        { "url": "https://nominatim.openstreetmap.org/*" }
+      ]
+    }
   ]
 }
