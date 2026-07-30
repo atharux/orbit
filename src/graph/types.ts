@@ -14,6 +14,8 @@ export interface GraphNode {
   verified?: boolean
   district?: string
   website?: string // venues only — used by the "no website" preset
+  apps?: string[] // App Store publishers — titles they have shipped
+  lastShipped?: string // App Store publishers — date of their most recent release
 }
 
 export type LinkKind = 'WORKS_AT' | 'VERIFIED_BY' | 'ENROLLED_IN' | 'TARGETS'

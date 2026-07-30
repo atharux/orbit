@@ -5,6 +5,7 @@ import {
   enrichLead, categoryDisplayName,
   type OsmBusiness, type AiScraperOptions,
 } from '../scraper'
+import { discoverViaAppStore } from '../appstore'
 
 interface Props {
   vertical: Vertical
@@ -60,11 +61,14 @@ export function ScraperPanel({ vertical, existingLeads, aiOptions, onLeadsAdded,
     setDiscovering(true)
     setError(null)
     setResults([])
-    setStatus('Querying OpenStreetMap…')
+    setStatus(vertical.discoveryMode === 'appstore' ? 'Searching the App Store…' : 'Querying OpenStreetMap…')
     try {
-      const businesses = vertical.discoveryMode === 'worker'
-        ? await discoverByLocation(location.trim(), cats, aiOptions)
-        : await discoverViaOverpass(location.trim(), cats)
+      const businesses =
+        vertical.discoveryMode === 'appstore'
+          ? await discoverViaAppStore(location.trim(), cats, setStatus)
+          : vertical.discoveryMode === 'worker'
+            ? await discoverByLocation(location.trim(), cats, aiOptions)
+            : await discoverViaOverpass(location.trim(), cats)
       const existingKeys = new Set(existingLeads.map(l => `${l.name.toLowerCase()}::${l.city.toLowerCase()}`))
       const items: DiscoveredItem[] = businesses
         .filter(b => b.name?.trim())
@@ -102,9 +106,22 @@ export function ScraperPanel({ vertical, existingLeads, aiOptions, onLeadsAdded,
       website: item.business.website,
       phone: item.business.phone,
       email: item.business.email,
+      notes: (item.business as { notes?: string }).notes,
       status: 'new' as const,
       tags: [],
-      source: 'osm',
+      source: item.business.source ?? 'osm',
+      // App Store leads carry their published titles and shipping signal so the
+      // operator can judge relevance without leaving the app.
+      custom_fields: (() => {
+        const b = item.business as { appTitles?: string[]; lastShipped?: string; reviewScore?: number }
+        if (!b.appTitles?.length) return undefined
+        return {
+          apps: b.appTitles.join(' · '),
+          app_count: String(b.appTitles.length),
+          ...(b.lastShipped ? { last_shipped: b.lastShipped.slice(0, 10) } : {}),
+          ...(b.reviewScore != null ? { review_score: String(b.reviewScore) } : {}),
+        }
+      })(),
       created_at: now,
       updated_at: now,
     }))
@@ -176,7 +193,7 @@ export function ScraperPanel({ vertical, existingLeads, aiOptions, onLeadsAdded,
               {vertical.icon} Discover {vertical.name} leads
             </div>
             <div className="panel-sub">
-            {vertical.discoveryMode === 'worker' ? 'venue-scraper · Worker' : 'Overpass API · OpenStreetMap'}
+            {vertical.discoveryMode === 'appstore' ? 'iTunes Search API · Apple' : vertical.discoveryMode === 'worker' ? 'venue-scraper · Worker' : 'Overpass API · OpenStreetMap'}
           </div>
           </div>
           <button className="panel-close" onClick={onClose}>×</button>

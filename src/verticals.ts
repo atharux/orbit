@@ -59,6 +59,24 @@ export const BUILT_IN_VERTICALS: Vertical[] = [
     discoveryMode: 'overpass',
   },
   {
+    id: 'dev-studios',
+    name: 'iOS Studios',
+    icon: '◐',
+    color: '#2F7D84',
+    // Not OSM tags — these are iTunes Search terms. App studios are frequently
+    // remote or unmapped, and OSM has no notion of "publishes iOS apps", which is
+    // the only signal that qualifies a lead for App Review work.
+    // Legal-form and studio naming conventions, not descriptive keywords. The
+    // iTunes API searches app names and descriptions, so "app studio" returns apps
+    // *about* making apps (Google, GoDaddy, BandLab) rather than studios that make
+    // them. Searching how a studio names itself finds the studio.
+    osmCategories: [
+      'appstore:GmbH', 'appstore:Studio', 'appstore:Labs', 'appstore:Interactive',
+      'appstore:Digital', 'appstore:Software', 'appstore:Solutions', 'appstore:Media',
+    ],
+    discoveryMode: 'appstore',
+  },
+  {
     id: 'professional',
     name: 'Professional Services',
     icon: '○',
