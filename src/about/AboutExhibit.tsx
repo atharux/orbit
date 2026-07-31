@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 // Orbit "exhibit" — an interactive About view styled as an early scientific
 // plate. Lineage: Ernst Haeckel's Kunstformen der Natur (labelled naturalist
@@ -14,8 +14,36 @@ const ORANGE = '#b5622a'
 const GREEN = '#4d7a46'
 const INK = '#201e18'
 
+// Fig. 5 is a working miniature of the Sequences screen: pressing Run moves the
+// company along exactly as the real one does — last step finishes rather than
+// advancing. Nothing is sent and nothing is stored.
+const DEMO_PLAN = [
+  { day: 'Day 0', glyph: '✉', subject: 'Intro email', channel: 'Email', x: 80 },
+  { day: 'Day 2', glyph: '☎', subject: 'Quick call', channel: 'Call', x: 240 },
+  { day: 'Day 5', glyph: 'in', subject: 'Say hello', channel: 'LinkedIn', x: 400 },
+  { day: 'Day 9', glyph: '✉', subject: 'Last note', channel: 'Email', x: 560 },
+]
+
 export function AboutExhibit({ onClose }: { onClose: () => void }) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState(0)
+  const [finished, setFinished] = useState(false)
+
+  function runDemo() {
+    if (finished) return
+    if (pos < DEMO_PLAN.length - 1) setPos(pos + 1)
+    else setFinished(true)
+  }
+  function resetDemo() { setPos(0); setFinished(false) }
+
+  const stepState = (i: number) =>
+    finished || i < pos ? { label: '✓ done', c: GREEN }
+      : i === pos ? { label: 'due now', c: TEAL }
+        : { label: 'to come', c: '#a89f89' }
+  const nowDue = DEMO_PLAN[pos]
+  const demoLine = finished
+    ? 'Neon Cellar — finished the plan. Nothing left to do.'
+    : `Neon Cellar — next up: ${nowDue.subject.toLowerCase()}, on ${nowDue.day.toLowerCase()}.`
 
   useEffect(() => {
     const els = rootRef.current?.querySelectorAll('[data-reveal]')
@@ -56,7 +84,7 @@ export function AboutExhibit({ onClose }: { onClose: () => void }) {
             spreadsheet quietly loses.
           </p>
           <div className="ax-hero-rule" />
-          <div className="ax-hero-meta">Plates I – V · circa two minutes</div>
+          <div className="ax-hero-meta">Plates I – VI · circa three minutes</div>
         </section>
 
         {/* PLATE I — CASCADE */}
@@ -176,8 +204,111 @@ export function AboutExhibit({ onClose }: { onClose: () => void }) {
           </figure>
         </Station>
 
-        {/* PLATE V — STACK */}
-        <Station n="V" title="What runs where, and why">
+        {/* PLATE V — SEQUENCES */}
+        <Station n="V" title="Following up, without losing track">
+          <p className="ax-why">
+            You email forty venues. Three write back. Two weeks later you cannot remember who you
+            chased, who you chased twice, and who never heard from you at all — so you either pester
+            people or quietly drop them. A{' '}
+            <Term def="A follow-up plan: a short list of messages, each with a day and a way of getting in touch. You write it once and use it for every company.">sequence</Term>{' '}
+            is the follow-up plan you write <b>once</b> — an intro email today, a call in two days, a
+            LinkedIn note next week — and then hand every company to. Orbit remembers where each one
+            has got to. The only question left is <b>who is due next</b>.
+          </p>
+          <figure className="ax-plate">
+            <svg viewBox="0 0 640 250" className="ax-svg" role="img" aria-label={`A follow-up plan of four messages. ${demoLine}`}>
+              <text x={320} y={24} textAnchor="middle" className="ax-svg-edge" fill="#8b8677">the plan — written once, used for every company</text>
+              <path id="spine" d="M80 94 L560 94" fill="none" stroke={INK} strokeOpacity="0.28" strokeWidth="1" className="ax-flow" />
+
+              {DEMO_PLAN.map((st, i) => {
+                const { label, c } = stepState(i)
+                return (
+                  <g key={st.x}>
+                    <circle cx={st.x} cy="94" r="14" fill="#efeadd" stroke={c} strokeWidth="1.5" />
+                    <text x={st.x} y="98" textAnchor="middle" className="ax-svg-glyph" fill={c}>{st.glyph}</text>
+                    <text x={st.x} y="52" textAnchor="middle" className="ax-svg-label">{st.day}</text>
+                    <text x={st.x} y="128" textAnchor="middle" className="ax-svg-label">{st.subject}</text>
+                    <text x={st.x} y="141" textAnchor="middle" className="ax-svg-sub">{st.channel}</text>
+                    <text x={st.x} y="160" textAnchor="middle" className="ax-svg-sub" fill={c}>{label}</text>
+                  </g>
+                )
+              })}
+
+              {/* the company, standing at whatever is due next */}
+              <g className="ax-demo-token" style={{ transform: `translate(${DEMO_PLAN[pos].x}px, 190px)` }}>
+                <circle r="6" fill="none" stroke={finished ? GREEN : TEAL} strokeWidth="1.25" />
+                <circle r="2.2" fill={finished ? GREEN : TEAL} />
+                <text y="20" textAnchor="middle" className="ax-svg-sub" fill={finished ? GREEN : INK}>
+                  Neon Cellar{finished ? ' · done' : ''}
+                </text>
+              </g>
+              <text x="18" y="238" className="ax-svg-sub">Every company you add goes through the same plan, each at its own pace.</text>
+            </svg>
+
+            <div className="ax-demo-bar">
+              <button className="ax-demo-run" onClick={runDemo} disabled={finished}>Run ▶</button>
+              <button className="ax-demo-reset" onClick={resetDemo}>Start over</button>
+              <span className="ax-demo-hint" aria-live="polite">
+                {finished ? 'That was the whole plan — Neon Cellar is done.' : demoLine}
+              </span>
+            </div>
+
+            <div className="ax-ask" style={{ marginTop: 18 }}>
+              <div className="ax-ask-q">In the real screen, <b>Run ▶</b> does one thing more</div>
+              <div className="ax-ask-note">
+                It opens your mail with the subject and message already written, for you to read over
+                and send yourself. Orbit never sends anything on its own — nothing leaves your
+                computer until you press send. The day numbers are your plan rather than a timer, so
+                nothing happens while the app is closed, and no one is chased behind your back. For a
+                call, a LinkedIn note or a reminder there is nothing to open: Run just marks it as
+                taken care of.
+              </div>
+            </div>
+            <figcaption className="ax-fig">
+              Fig. 5 — This one is live. Press Run ▶ and watch Neon Cellar move along the plan; no
+              mail is sent and nothing is saved.
+            </figcaption>
+          </figure>
+
+          <div className="ax-stack" style={{ marginTop: 30 }}>
+            <StackRow layer="ADDING COMPANIES" items={[
+              ['One at a time, by name', 'press “+ Enroll companies” — enroll just means add to the plan — and start typing'],
+              ['A whole group from the graph', 'select the venues you want in the graph and add them all at once'],
+              ['Or have it done for you', 'when Orbit finds an email for a company that had none, it can add that company to a plan you pick in Settings'],
+            ]} />
+            <StackRow layer="KEEPING TRACK" items={[
+              ['Done looks after itself', 'finish the last touch and the company moves to Done on its own'],
+              ['Replied, Bounced and Paused are yours to mark', 'Orbit does not read your inbox, so it cannot know — one click on the card when you hear back'],
+            ]} />
+            <StackRow layer="YOUR PLANS" items={[
+              ['They stay on this machine', 'nothing is uploaded; your plans live in this browser, next to your leads'],
+              ['They ride along in your backup', 'save or restore a backup and the plans come too — the most recently edited copy wins'],
+            ]} />
+          </div>
+
+          <div className="ax-clash">
+            <div className="ax-clash-head">One word, two meanings — worth knowing before you open the graph.</div>
+            <div className="ax-clash-row">
+              <span className="ax-clash-k">Here</span>
+              <span className="ax-clash-v">
+                A follow-up plan you wrote, with its own days and touches.
+              </span>
+            </div>
+            <div className="ax-clash-row">
+              <span className="ax-clash-k">In the graph</span>
+              <span className="ax-clash-v">
+                The green “Sequence” dots are something else: plain status labels — Contacted,
+                Replied, and so on. They have no days and no touches.
+              </span>
+            </div>
+            <div className="ax-clash-note">
+              The two are not joined yet — adding a company to a plan here does not change the graph.
+            </div>
+          </div>
+        </Station>
+
+        {/* PLATE VI — STACK */}
+        <Station n="VI" title="What runs where, and why">
           <div className="ax-stack">
             <StackRow layer="INTERFACE" items={[
               ['React 19 · Vite · TypeScript', 'the base Pocket Leads app, local-first'],
@@ -341,6 +472,7 @@ const CSS = `
 .ax-svg-label { font: 500 11.5px var(--mono, monospace); letter-spacing: .04em; fill: ${INK}; }
 .ax-svg-sub { font: 400 10px var(--mono, monospace); fill: #8b8677; }
 .ax-svg-edge { font: italic 400 11px var(--disp, sans-serif); }
+.ax-svg-glyph { font: 500 11px var(--mono, monospace); }
 .ax-flow { stroke-dasharray: 3 5; animation: ax-dash 1.3s linear infinite; }
 @keyframes ax-dash { to { stroke-dashoffset: -16; } }
 .ax-node { animation: ax-node 4s ease-in-out infinite; }
@@ -363,6 +495,25 @@ const CSS = `
 .ax-code-is { color: ${GREEN}; font-size: 13px; }
 .ax-arrow { color: #8b8677; font-size: 12px; font-style: italic; }
 .ax-transform-note { color: #8b8677; font-size: 11px; margin-left: auto; }
+
+.ax-demo-token { transition: transform .45s cubic-bezier(.4,0,.2,1); }
+.ax-demo-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.ax-demo-run { font: 500 12px var(--mono, monospace); letter-spacing: .06em; color: #efeadd; background: ${INK};
+  border: 1px solid ${INK}; border-radius: 1px; padding: 9px 18px; cursor: pointer; }
+.ax-demo-run:hover:not(:disabled) { background: ${TEAL}; border-color: ${TEAL}; }
+.ax-demo-run:disabled { background: transparent; color: #a89f89; border-color: #c3bba6; cursor: default; }
+.ax-demo-reset { font: 400 12px var(--mono, monospace); letter-spacing: .06em; color: ${INK}; background: transparent;
+  border: 1px solid #c3bba6; border-radius: 1px; padding: 9px 14px; cursor: pointer; }
+.ax-demo-reset:hover { background: ${INK}; color: #efeadd; border-color: ${INK}; }
+.ax-demo-hint { font-family: var(--disp, sans-serif); font-size: 13px; font-style: italic; color: #7c7565; }
+
+.ax-clash { margin-top: 30px; padding: 17px 18px; background: #f6f2e7; border: 1px solid #d3cbb8; border-radius: 1px; }
+.ax-clash-head { font-family: var(--disp, sans-serif); font-size: 13.5px; color: ${INK}; margin-bottom: 12px; }
+.ax-clash-row { display: flex; gap: 16px; align-items: baseline; padding: 6px 0; }
+.ax-clash-k { flex-shrink: 0; width: 104px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #a89f89; }
+.ax-clash-v { font-family: var(--disp, sans-serif); font-size: 13px; line-height: 1.6; color: #7c7565; }
+.ax-clash-code { font-family: var(--mono, monospace); font-size: 12px; color: #2f6d74; }
+.ax-clash-note { margin-top: 12px; font-size: 11px; color: #8b8677; font-style: italic; letter-spacing: .04em; }
 
 .ax-ask { background: #f6f2e7; border: 1px solid ${INK}; border-radius: 1px; padding: 22px; }
 .ax-ask-q { font-family: var(--disp, sans-serif); font-size: 17px; color: ${INK}; }
@@ -397,6 +548,7 @@ const CSS = `
   .ax-stack-row { flex-direction: column; gap: 8px; }
   .ax-pipe { flex-direction: column; }
   .ax-pipe-seg { width: 1px; height: 30px; align-self: center; }
+  .ax-clash-row { flex-direction: column; gap: 4px; }
   .ax-tip { width: 200px; }
 }
 `
