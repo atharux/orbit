@@ -277,6 +277,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             <div style="font-weight:600;margin-top:2px">${n.label}</div>
             ${n.sub ? `<div style="opacity:.7">${n.sub}</div>` : ''}
             ${n.district ? `<div style="opacity:.7">${n.district}</div>` : ''}
+            ${n.lastShipped ? `<div style="opacity:.7;margin-top:3px">shipped ${n.lastShipped}</div>` : ''}
+            ${n.apps?.length ? `<div style="margin-top:5px;padding-top:5px;border-top:1px solid ${ct().labelText}22">
+              <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.55">Apps · ${n.apps.length}</div>
+              ${n.apps.slice(0, 4).map((a: string) => `<div style="opacity:.85">${a}</div>`).join('')}
+              ${n.apps.length > 4 ? `<div style="opacity:.5">+${n.apps.length - 4} more</div>` : ''}
+            </div>` : ''}
           </div>`)
         .linkColor(linkRestColor)
         .linkWidth((l: any) => (highlightLinks.has(l) ? 1.8 : 0.7))
@@ -365,7 +371,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           }
         }
         refreshHighlight()
-        setSelected({ id: node.id, kind: node.kind, label: node.label, sub: node.sub, verified: node.verified, district: node.district })
+        setSelected({ id: node.id, kind: node.kind, label: node.label, sub: node.sub, verified: node.verified, district: node.district, apps: node.apps, lastShipped: node.lastShipped })
 
         // Fly the camera to the node.
         const dist = 120
@@ -816,6 +822,20 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           <div style={styles.cardTitle}>{selected.label}</div>
           {selected.sub && <div style={styles.cardSub}>{selected.sub}</div>}
           {selected.district && <div style={styles.cardSub}>{selected.district}</div>}
+          {selected.lastShipped && <div style={styles.cardSub}>last shipped {selected.lastShipped}</div>}
+          {!!selected.apps?.length && (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(127,127,127,.25)' }}>
+              <div style={{ ...styles.cardSub, letterSpacing: '.1em', textTransform: 'uppercase', fontSize: 9, opacity: .6 }}>
+                Apps · {selected.apps.length}
+              </div>
+              {selected.apps.slice(0, 8).map(a => (
+                <div key={a} style={{ ...styles.cardSub, opacity: .9 }}>{a}</div>
+              ))}
+              {selected.apps.length > 8 && (
+                <div style={{ ...styles.cardSub, opacity: .5 }}>+{selected.apps.length - 8} more</div>
+              )}
+            </div>
+          )}
 
           {/* Action bar — only for nodes backed by a real lead */}
           {activeLead && (

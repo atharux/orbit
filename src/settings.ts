@@ -9,14 +9,40 @@ export interface AppSettings {
   autoEnrollSeqId: string // sequence id to auto-enroll newly-reachable leads into ('' = off)
 }
 
+// Fallback list, verified against OpenRouter's live catalogue on 2026-07-30.
+// Free model IDs churn constantly — five of the six previously listed here had
+// been withdrawn (DeepSeek R1 and Chat, Llama 3.1 8B, Mistral 7B, Gemma 2 9B),
+// which meant a user selecting one got a silent failure. Prefer the live list
+// from fetchFreeModels(); this is only what we fall back to when that call fails.
 export const FREE_MODELS = [
   { id: 'auto', label: 'Auto (OpenRouter picks)' },
-  { id: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1 (free)' },
-  { id: 'deepseek/deepseek-chat:free', label: 'DeepSeek Chat (free)' },
-  { id: 'meta-llama/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (free)' },
-  { id: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B (free)' },
-  { id: 'google/gemma-2-9b-it:free', label: 'Gemma 2 9B (free)' },
+  { id: 'google/gemma-4-31b-it:free', label: 'Gemma 4 31B (free)' },
+  { id: 'openai/gpt-oss-20b:free', label: 'GPT OSS 20B (free)' },
+  { id: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'Nemotron 3 Super 120B (free)' },
+  { id: 'nvidia/nemotron-nano-9b-v2:free', label: 'Nemotron Nano 9B (free)' },
+  { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B (free)' },
+  { id: 'inclusionai/ling-3.0-flash:free', label: 'Ling 3.0 Flash (free)' },
 ]
+
+/**
+ * Ask OpenRouter what is actually free right now. Hardcoded lists go stale
+ * within weeks; this keeps the selector honest. Falls back to FREE_MODELS on
+ * any failure so the UI never ends up with an empty dropdown.
+ */
+export async function fetchFreeModels(): Promise<{ id: string; label: string }[]> {
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models')
+    if (!res.ok) throw new Error(String(res.status))
+    const { data } = await res.json()
+    const free = (data as { id: string; name?: string }[])
+      .filter(m => m.id.endsWith(':free'))
+      .map(m => ({ id: m.id, label: `${m.name ?? m.id} (free)` }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+    return free.length ? [{ id: 'auto', label: 'Auto (OpenRouter picks)' }, ...free] : FREE_MODELS
+  } catch {
+    return FREE_MODELS
+  }
+}
 
 const DEFAULTS: AppSettings = {
   openRouterApiKey: import.meta.env.VITE_OPENROUTER_API_KEY ?? '',

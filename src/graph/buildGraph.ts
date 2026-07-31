@@ -32,6 +32,8 @@ export function buildGraphFromLeads(leads: Lead[]): GraphData {
       id: venueId, kind: 'venue', label: lead.name,
       sub: lead.category || undefined, district: lead.city || undefined,
       website: lead.website || undefined,
+      apps: lead.custom_fields?.apps ? lead.custom_fields.apps.split(' · ') : undefined,
+      lastShipped: lead.custom_fields?.last_shipped || undefined,
     })
 
     // Sequence node per outreach status; the venue is TARGETS-ed by it.

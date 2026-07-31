@@ -71,7 +71,8 @@ export interface Vertical {
   osmCategories: string[]
   // 'worker' = venue-scraper Cloudflare Worker (nightlife only)
   // 'overpass' = direct Overpass API query (all other verticals)
-  discoveryMode?: 'worker' | 'overpass'
+  // 'appstore' = Apple iTunes Search API (dev-studios); categories are search terms, not OSM tags
+  discoveryMode?: 'worker' | 'overpass' | 'appstore'
   isCustom?: boolean
 }
 
