@@ -3,8 +3,9 @@ import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import SpriteText from 'three-spritetext'
 import ForceGraph3D from '3d-force-graph'
-import type { Lead, OutreachStatus } from '../types'
+import type { Lead, OutreachStatus, Vertical } from '../types'
 import { STATUSES, STATUS_LABEL, STATUS_COLOR } from '../types'
+import { loadAllVerticals } from '../verticals'
 import type { GraphData, GraphNode, GraphLink } from './types'
 import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
@@ -137,14 +138,17 @@ function neighborsOf(g: GraphData, id: string): Neighbor[] {
 }
 
 // Smart find: multi-token AND match over a node's label/sub/district, plus
-// kind and verified constraints. Returns the ids of matching nodes.
+// kind, vertical and verified constraints. Returns the ids of matching nodes.
 function filterNodeIds(
-  g: GraphData, text: string, kinds: Set<GraphNode['kind']>, verifiedOnly: boolean,
+  g: GraphData, text: string, kinds: Set<GraphNode['kind']>, verticals: Set<string>, verifiedOnly: boolean,
 ): string[] {
   const tokens = text.trim().toLowerCase().split(/\s+/).filter(Boolean)
   return g.nodes
     .filter(n => {
       if (kinds.size && !kinds.has(n.kind)) return false
+      // Only venue/contact nodes carry a vertical — source/sequence nodes span
+      // verticals and are excluded once a vertical filter is active.
+      if (verticals.size && !(n.verticalId && verticals.has(n.verticalId))) return false
       if (verifiedOnly && !n.verified) return false
       if (tokens.length) {
         const hay = `${n.label} ${n.sub ?? ''} ${n.district ?? ''}`.toLowerCase()
@@ -196,8 +200,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // FIND panel state — instant client-side search + toggle filter chips.
   const [filterText, setFilterText] = useState('')
   const [activeKinds, setActiveKinds] = useState<Set<GraphNode['kind']>>(new Set())
+  const [activeVerticals, setActiveVerticals] = useState<Set<string>>(new Set())
   const [verifiedOnly, setVerifiedOnly] = useState(false)
   const [filterCount, setFilterCount] = useState<number | null>(null)
+  const [verticals] = useState<Vertical[]>(loadAllVerticals)
 
   useEffect(() => {
     let disposed = false
@@ -528,35 +534,41 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
   // FIND: recompute the highlighted set from the current search + chips and
   // push it to the canvas. Empty filter releases the highlight (rest state).
-  function applyFilter(text: string, kinds: Set<GraphNode['kind']>, vOnly: boolean) {
+  function applyFilter(text: string, kinds: Set<GraphNode['kind']>, verts: Set<string>, vOnly: boolean) {
     if (!graphData) return
-    const active = Boolean(text.trim()) || kinds.size > 0 || vOnly
+    const active = Boolean(text.trim()) || kinds.size > 0 || verts.size > 0 || vOnly
     if (!active) { setFilterCount(null); graphRef.current?.focusNodes([]); return }
-    const ids = filterNodeIds(graphData, text, kinds, vOnly)
+    const ids = filterNodeIds(graphData, text, kinds, verts, vOnly)
     setFilterCount(ids.length)
     graphRef.current?.focusNodes(ids)
   }
 
   function onSearchChange(v: string) {
     setFilterText(v)
-    applyFilter(v, activeKinds, verifiedOnly)
+    applyFilter(v, activeKinds, activeVerticals, verifiedOnly)
   }
   function toggleKind(k: GraphNode['kind']) {
     const next = new Set(activeKinds)
     next.has(k) ? next.delete(k) : next.add(k)
     setActiveKinds(next)
-    applyFilter(filterText, next, verifiedOnly)
+    applyFilter(filterText, next, activeVerticals, verifiedOnly)
+  }
+  function toggleVertical(id: string) {
+    const next = new Set(activeVerticals)
+    next.has(id) ? next.delete(id) : next.add(id)
+    setActiveVerticals(next)
+    applyFilter(filterText, activeKinds, next, verifiedOnly)
   }
   function toggleVerified() {
     const v = !verifiedOnly
     setVerifiedOnly(v)
-    applyFilter(filterText, activeKinds, v)
+    applyFilter(filterText, activeKinds, activeVerticals, v)
   }
   function clearFilter() {
-    setFilterText(''); setActiveKinds(new Set()); setVerifiedOnly(false); setFilterCount(null)
+    setFilterText(''); setActiveKinds(new Set()); setActiveVerticals(new Set()); setVerifiedOnly(false); setFilterCount(null)
     graphRef.current?.focusNodes([])
   }
-  const filterActive = Boolean(filterText.trim()) || activeKinds.size > 0 || verifiedOnly
+  const filterActive = Boolean(filterText.trim()) || activeKinds.size > 0 || activeVerticals.size > 0 || verifiedOnly
 
   // ---- bulk actions on the selection (closes "found the leak → now act") ----
   const selectedLeads: Lead[] = (() => {
@@ -607,6 +619,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // Only offer chips for kinds/attributes actually present in this graph.
   const presentKinds = graphData
     ? (Object.keys(KIND_COLOR) as GraphNode['kind'][]).filter(k => graphData.nodes.some(n => n.kind === k))
+    : []
+  const presentVerticals = graphData
+    ? verticals.filter(v => graphData.nodes.some(n => n.verticalId === v.id))
     : []
   const hasVerifiedNodes = graphData ? graphData.nodes.some(n => n.verified) : false
 
@@ -739,6 +754,24 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
                   ✓ Verified
                 </button>
               )}
+            </div>
+          )}
+          {presentVerticals.length > 0 && (
+            <div style={styles.filterChips}>
+              {presentVerticals.map(v => {
+                const on = activeVerticals.has(v.id)
+                return (
+                  <button
+                    key={v.id}
+                    style={{ ...styles.chip, ...(on ? { borderColor: v.color, color: v.color, background: v.color + '1f' } : null) }}
+                    onClick={() => toggleVertical(v.id)}
+                    title={`Show only ${v.name}`}
+                  >
+                    <span style={{ ...styles.chipDot, background: v.color }} />
+                    {v.icon} {v.name}
+                  </button>
+                )
+              })}
             </div>
           )}
 
