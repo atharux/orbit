@@ -955,14 +955,14 @@ function panelTokens(mode: ThemeMode) {
       overlayBg: '#05060a', bg: '#0b0e14e6', card: '#0b0e14f2', legend: '#0b0e14cc',
       solid: '#05060a', btn: '#111826', border: '#1f2937', border2: '#141a24',
       text: '#e5e7eb', text2: '#cbd5e1', muted: '#94a3b8', faint: '#64748b', faint2: '#475569',
-      cardSub: '#9ca3af', topGrad: 'linear-gradient(#05060aee, #05060a00)', shadow: '0 10px 40px #0008',
+      cardSub: '#9ca3af', topGrad: 'linear-gradient(#05060af5 0%, #05060af5 78%, #05060a00 100%)', shadow: '0 10px 40px #0008',
       accent: '#22d3ee', accentDim: '#22d3ee55', cypher: '#67e8f9', brandGlow: '0 0 12px #22d3ee',
     }
     : {
       overlayBg: '#efeadd', bg: '#f6f2e7f2', card: '#f6f2e7f7', legend: '#f6f2e7ee',
       solid: '#efeadd', btn: '#efe9db', border: '#c3bba6', border2: '#ddd5c2',
       text: '#201e18', text2: '#3a362e', muted: '#6b6659', faint: '#8b8677', faint2: '#a89f89',
-      cardSub: '#6b6659', topGrad: 'linear-gradient(#efeaddee, #efeadd00)', shadow: '4px 4px 0 rgba(32,30,24,.10)',
+      cardSub: '#6b6659', topGrad: 'linear-gradient(#efeaddf5 0%, #efeaddf5 78%, #efeadd00 100%)', shadow: '4px 4px 0 rgba(32,30,24,.10)',
       accent: '#2f7d84', accentDim: '#2f7d8455', cypher: '#2f6d74', brandGlow: 'none',
     }
 }
