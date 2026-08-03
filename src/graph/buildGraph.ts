@@ -34,6 +34,7 @@ export function buildGraphFromLeads(leads: Lead[]): GraphData {
       website: lead.website || undefined,
       apps: lead.custom_fields?.apps ? lead.custom_fields.apps.split(' · ') : undefined,
       lastShipped: lead.custom_fields?.last_shipped || undefined,
+      verticalId: lead.vertical_id || undefined,
     })
 
     // Sequence node per outreach status; the venue is TARGETS-ed by it.
@@ -50,6 +51,7 @@ export function buildGraphFromLeads(leads: Lead[]): GraphData {
         id: contactId, kind: 'contact',
         label: lead.name, sub: verified ? 'email on file' : 'phone only',
         verified,
+        verticalId: lead.vertical_id || undefined,
       })
       addLink({ source: contactId, target: venueId, kind: 'WORKS_AT' })
       addLink({ source: contactId, target: seqId, kind: 'ENROLLED_IN' })

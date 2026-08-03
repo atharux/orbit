@@ -14,6 +14,7 @@ export interface GraphNode {
   verified?: boolean
   district?: string
   website?: string // venues only — used by the "no website" preset
+  verticalId?: string // venue/contact only — the lead's vertical, drives the vertical filter chips
   apps?: string[] // App Store publishers — titles they have shipped
   lastShipped?: string // App Store publishers — date of their most recent release
 }
