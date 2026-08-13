@@ -31,6 +31,8 @@ interface Row {
   // full-fidelity backup fields
   email: string | null; phone: string | null; website: string | null
   updatedAt: string; leadJson: string
+  // vertical filter chip + App Store card fields (mirrors buildGraph.ts's local projection)
+  verticalId: string; apps: string; lastShipped: string
 }
 
 function toRow(l: Lead): Row {
@@ -43,6 +45,7 @@ function toRow(l: Lead): Row {
     source: l.source || null, srcVerified: verified && Boolean(l.source),
     email: l.email || null, phone: l.phone || null, website: l.website || null,
     updatedAt: l.updated_at || '', leadJson: JSON.stringify(l),
+    verticalId: l.vertical_id || '', apps: l.custom_fields?.apps || '', lastShipped: l.custom_fields?.last_shipped || '',
   }
 }
 
@@ -54,7 +57,8 @@ UNWIND $rows AS r
 MERGE (v:Venue {venue_id: r.venueId})
   SET v.name = r.name, v.category = r.category, v.district = r.district,
       v.email = r.email, v.phone = r.phone, v.website = r.website,
-      v.status = r.status, v.updated_at = r.updatedAt, v.lead_json = r.leadJson
+      v.status = r.status, v.updated_at = r.updatedAt, v.lead_json = r.leadJson,
+      v.vertical_id = r.verticalId, v.apps = r.apps, v.last_shipped = r.lastShipped
 MERGE (s:Sequence {sequence_id: r.seqId})
   SET s.name = r.seqName, s.status = r.status
 MERGE (s)-[:TARGETS]->(v)`

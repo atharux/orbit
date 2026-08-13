@@ -11,7 +11,7 @@ import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink } from './neo4jSource'
-import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, type AskResult } from './ask'
+import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, type AskResult } from './ask'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
 
@@ -608,6 +608,13 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }
   function clearSelection() { setBulkMsg(''); graphRef.current?.focusNodes([]) }
 
+  function findPath() {
+    if (!graphData || selectedIds.length !== 2) return
+    const res = findShortestPath(graphData, selectedIds[0], selectedIds[1])
+    setAskResult({ ...res, q: 'Shortest path between selection' })
+    graphRef.current?.focusNodes(res.nodeIds)
+  }
+
   const stats = graphData ? computeStats(graphData) : null
   const neighbors = graphData && selected ? neighborsOf(graphData, selected.id) : []
   // The real lead behind the selected node (venue/contact on a leads graph),
@@ -675,29 +682,111 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         <button style={styles.closeBtn} onClick={onClose}>Exit graph ✕</button>
       </div>
 
-      {/* Pipeline stats HUD */}
-      {stats && status === 'ready' && (
-        <div style={styles.stats}>
-          <div style={styles.statsHead}>OUTREACH STATE</div>
-          <div style={styles.statGrid}>
-            <Stat label="Companies" value={stats.venues} color={CANVAS[theme].node.venue} s={styles} />
-            <Stat label="Contacts" value={stats.contacts} color={CANVAS[theme].node.contact} s={styles} />
-            <Stat label="Verified" value={stats.verified} color={CANVAS[theme].node.sequence} s={styles} />
-            <Stat label="Sources" value={stats.sources} color={CANVAS[theme].node.source} s={styles} />
-          </div>
-          <div style={styles.coverageRow}>
-            <span>verified-contact coverage</span>
-            <span style={{ color: stats.coverage >= 60 ? '#34d399' : stats.coverage >= 30 ? '#f97316' : '#EF4444' }}>
-              {stats.coverage}%
-            </span>
-          </div>
-          <div style={styles.coverageBar}>
-            <div style={{ ...styles.coverageFill, width: `${stats.coverage}%` }} />
-          </div>
-          {stats.uncovered > 0 && (
-            <button style={styles.statAction} onClick={() => runPreset(PRESETS[1])}>
-              {stats.uncovered} {stats.uncovered === 1 ? 'company' : 'companies'} with no verified contact →
-            </button>
+      {/* Right rail — stats HUD + selected node card share one flex column so they can never overlap */}
+      {status === 'ready' && (stats || selected) && (
+        <div style={styles.rightRail}>
+          {stats && (
+            <div style={styles.stats}>
+              <div style={styles.statsHead}>OUTREACH STATE</div>
+              <div style={styles.statGrid}>
+                <Stat label="Companies" value={stats.venues} color={CANVAS[theme].node.venue} s={styles} />
+                <Stat label="Contacts" value={stats.contacts} color={CANVAS[theme].node.contact} s={styles} />
+                <Stat label="Verified" value={stats.verified} color={CANVAS[theme].node.sequence} s={styles} />
+                <Stat label="Sources" value={stats.sources} color={CANVAS[theme].node.source} s={styles} />
+              </div>
+              <div style={styles.coverageRow}>
+                <span>verified-contact coverage</span>
+                <span style={{ color: stats.coverage >= 60 ? '#34d399' : stats.coverage >= 30 ? '#f97316' : '#EF4444' }}>
+                  {stats.coverage}%
+                </span>
+              </div>
+              <div style={styles.coverageBar}>
+                <div style={{ ...styles.coverageFill, width: `${stats.coverage}%` }} />
+              </div>
+              {stats.uncovered > 0 && (
+                <button style={styles.statAction} onClick={() => runPreset(PRESETS[1])}>
+                  {stats.uncovered} {stats.uncovered === 1 ? 'company' : 'companies'} with no verified contact →
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Selected node card — the active surface, so it carries the strongest shadow/border of the rail */}
+          {selected && (
+            <div style={{ ...styles.card, borderColor: nodeCol[selected.kind] }}>
+              <div style={{ ...styles.cardKind, color: nodeCol[selected.kind] }}>
+                {KIND_LABEL[selected.kind]}{selected.verified ? ' · verified' : ''}
+              </div>
+              <div style={styles.cardTitle}>{selected.label}</div>
+              {selected.sub && <div style={styles.cardSub}>{selected.sub}</div>}
+              {selected.district && <div style={styles.cardSub}>{selected.district}</div>}
+              {selected.lastShipped && <div style={styles.cardSub}>last shipped {selected.lastShipped}</div>}
+              {!!selected.apps?.length && (
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(127,127,127,.25)' }}>
+                  <div style={{ ...styles.cardSub, letterSpacing: '.1em', textTransform: 'uppercase', fontSize: 9, opacity: .6 }}>
+                    Apps · {selected.apps.length}
+                  </div>
+                  {selected.apps.slice(0, 8).map(a => (
+                    <div key={a} style={{ ...styles.cardSub, opacity: .9 }}>{a}</div>
+                  ))}
+                  {selected.apps.length > 8 && (
+                    <div style={{ ...styles.cardSub, opacity: .5 }}>+{selected.apps.length - 8} more</div>
+                  )}
+                </div>
+              )}
+
+              {/* Action bar — only for nodes backed by a real lead */}
+              {activeLead && (
+                <div style={styles.actions}>
+                  <div style={styles.actionLinks}>
+                    {activeLead.website && (
+                      <a style={styles.actionBtn} href={hrefFor(activeLead.website)} target="_blank" rel="noopener noreferrer">↗ Website</a>
+                    )}
+                    {activeLead.email && (
+                      <a style={styles.actionBtn} href={`mailto:${activeLead.email}`}>✉ Email</a>
+                    )}
+                    {activeLead.phone && (
+                      <a style={styles.actionBtn} href={`tel:${activeLead.phone}`}>☎ Call</a>
+                    )}
+                    {activeLead.instagram && (
+                      <a style={styles.actionBtn} href={instagramHref(activeLead.instagram)} target="_blank" rel="noopener noreferrer">◎ Instagram</a>
+                    )}
+                  </div>
+                  {onLeadStatusChange && (
+                    <label style={styles.statusRow}>
+                      <span style={styles.statusLabel}>Status</span>
+                      <select
+                        style={{ ...styles.statusSelect, color: STATUS_COLOR[activeLead.status], borderColor: STATUS_COLOR[activeLead.status] + '66' }}
+                        value={activeLead.status}
+                        onChange={e => onLeadStatusChange(activeLead.id, e.target.value as OutreachStatus)}
+                      >
+                        {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  {onOpenLead && (
+                    <button style={styles.openDetailBtn} onClick={() => onOpenLead(activeLead.id)}>
+                      Open full detail ↗
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {neighbors.length > 0 && (
+                <div style={styles.connections}>
+                  <div style={styles.connHead}>{neighbors.length} connection{neighbors.length === 1 ? '' : 's'} · click to jump</div>
+                  {neighbors.map((nb, i) => (
+                    <button key={i} style={styles.connRow} onClick={() => graphRef.current?.selectNodeById(nb.id)}>
+                      <span style={{ ...styles.connDot, background: nodeCol[nb.node.kind] }} />
+                      <span style={styles.connRel}>{nb.dir === 'out' ? REL_LABEL[nb.rel] : `←${REL_LABEL[nb.rel]}`}</span>
+                      <span style={styles.connName}>{nb.node.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div style={styles.cardHint}>neighbors highlighted · click empty space to release</div>
+            </div>
           )}
         </div>
       )}
@@ -846,84 +935,6 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         </div>
       )}
 
-      {/* Selected node card */}
-      {selected && (
-        <div style={{ ...styles.card, borderColor: nodeCol[selected.kind] }}>
-          <div style={{ ...styles.cardKind, color: nodeCol[selected.kind] }}>
-            {KIND_LABEL[selected.kind]}{selected.verified ? ' · verified' : ''}
-          </div>
-          <div style={styles.cardTitle}>{selected.label}</div>
-          {selected.sub && <div style={styles.cardSub}>{selected.sub}</div>}
-          {selected.district && <div style={styles.cardSub}>{selected.district}</div>}
-          {selected.lastShipped && <div style={styles.cardSub}>last shipped {selected.lastShipped}</div>}
-          {!!selected.apps?.length && (
-            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(127,127,127,.25)' }}>
-              <div style={{ ...styles.cardSub, letterSpacing: '.1em', textTransform: 'uppercase', fontSize: 9, opacity: .6 }}>
-                Apps · {selected.apps.length}
-              </div>
-              {selected.apps.slice(0, 8).map(a => (
-                <div key={a} style={{ ...styles.cardSub, opacity: .9 }}>{a}</div>
-              ))}
-              {selected.apps.length > 8 && (
-                <div style={{ ...styles.cardSub, opacity: .5 }}>+{selected.apps.length - 8} more</div>
-              )}
-            </div>
-          )}
-
-          {/* Action bar — only for nodes backed by a real lead */}
-          {activeLead && (
-            <div style={styles.actions}>
-              <div style={styles.actionLinks}>
-                {activeLead.website && (
-                  <a style={styles.actionBtn} href={hrefFor(activeLead.website)} target="_blank" rel="noopener noreferrer">↗ Website</a>
-                )}
-                {activeLead.email && (
-                  <a style={styles.actionBtn} href={`mailto:${activeLead.email}`}>✉ Email</a>
-                )}
-                {activeLead.phone && (
-                  <a style={styles.actionBtn} href={`tel:${activeLead.phone}`}>☎ Call</a>
-                )}
-                {activeLead.instagram && (
-                  <a style={styles.actionBtn} href={instagramHref(activeLead.instagram)} target="_blank" rel="noopener noreferrer">◎ Instagram</a>
-                )}
-              </div>
-              {onLeadStatusChange && (
-                <label style={styles.statusRow}>
-                  <span style={styles.statusLabel}>Status</span>
-                  <select
-                    style={{ ...styles.statusSelect, color: STATUS_COLOR[activeLead.status], borderColor: STATUS_COLOR[activeLead.status] + '66' }}
-                    value={activeLead.status}
-                    onChange={e => onLeadStatusChange(activeLead.id, e.target.value as OutreachStatus)}
-                  >
-                    {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                  </select>
-                </label>
-              )}
-              {onOpenLead && (
-                <button style={styles.openDetailBtn} onClick={() => onOpenLead(activeLead.id)}>
-                  Open full detail ↗
-                </button>
-              )}
-            </div>
-          )}
-
-          {neighbors.length > 0 && (
-            <div style={styles.connections}>
-              <div style={styles.connHead}>{neighbors.length} connection{neighbors.length === 1 ? '' : 's'} · click to jump</div>
-              {neighbors.map((nb, i) => (
-                <button key={i} style={styles.connRow} onClick={() => graphRef.current?.selectNodeById(nb.id)}>
-                  <span style={{ ...styles.connDot, background: nodeCol[nb.node.kind] }} />
-                  <span style={styles.connRel}>{nb.dir === 'out' ? REL_LABEL[nb.rel] : `←${REL_LABEL[nb.rel]}`}</span>
-                  <span style={styles.connName}>{nb.node.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div style={styles.cardHint}>neighbors highlighted · click empty space to release</div>
-        </div>
-      )}
-
       {/* Bulk action bar — the selection (from clicks OR a preset) becomes actions */}
       {selectedIds.length > 0 && (
         <div style={styles.bulkBar}>
@@ -957,6 +968,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             >
               {enriching ? 'Enriching…' : 'Enrich ✦'}
             </button>
+          )}
+          {selectedIds.length === 2 && (
+            <button style={styles.bulkBtn} onClick={findPath}>Find path ↝</button>
           )}
           <button style={styles.bulkBtn} onClick={bulkExport}>Export ↓</button>
           <button style={styles.bulkClear} onClick={clearSelection}>Clear</button>
@@ -1111,8 +1125,12 @@ function makeStyles(mode: ThemeMode): Styles {
       color: '#34d399', fontFamily: mono, fontSize: 10.5, cursor: 'pointer',
     },
 
+    rightRail: {
+      position: 'absolute', right: 20, top: 64, bottom: 20, zIndex: 3, width: 248,
+      display: 'flex', flexDirection: 'column', gap: 12, pointerEvents: 'none',
+    },
     stats: {
-      position: 'absolute', right: 20, top: 64, zIndex: 3, width: 230,
+      flexShrink: 0, pointerEvents: 'auto',
       background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8, padding: 14,
       fontFamily: mono, color: t.text, boxShadow: t.shadow,
     },
@@ -1131,10 +1149,10 @@ function makeStyles(mode: ThemeMode): Styles {
     },
 
     card: {
-      position: 'absolute', right: 20, bottom: 20, zIndex: 2, width: 248,
-      maxHeight: 'calc(100vh - 320px)', overflowY: 'auto',
-      background: t.card, border: '1px solid', borderRadius: 8, padding: '14px 16px',
+      flex: '1 1 auto', minHeight: 0, overflowY: 'auto', pointerEvents: 'auto',
+      background: t.card, border: '1px solid', borderRadius: 10, padding: '14px 16px',
       fontFamily: mono, color: t.text,
+      boxShadow: mode === 'dark' ? '0 20px 60px #000a, 0 0 0 1px #ffffff0d' : '0 16px 40px rgba(32,30,24,.18), 0 0 0 1px #ffffff80',
     },
     actions: { marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 },
     actionLinks: { display: 'flex', flexWrap: 'wrap', gap: 6 },
@@ -1149,8 +1167,9 @@ function makeStyles(mode: ThemeMode): Styles {
       fontFamily: mono, fontSize: 11, cursor: 'pointer', outline: 'none',
     },
     openDetailBtn: {
-      width: '100%', background: t.btn, border: `1px solid ${t.accentDim}`, borderRadius: 4,
-      padding: '7px 9px', color: t.accent, fontFamily: mono, fontSize: 11, cursor: 'pointer',
+      width: '100%', background: t.accent, border: `1px solid ${t.accent}`, borderRadius: 4,
+      padding: '9px 9px', color: t.solid, fontFamily: mono, fontSize: 11.5, fontWeight: 700,
+      letterSpacing: '.02em', cursor: 'pointer', boxShadow: mode === 'dark' ? t.brandGlow : 'none',
     },
     connections: { marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 10 },
     connHead: { fontSize: 9, letterSpacing: '.1em', color: t.faint, marginBottom: 6 },

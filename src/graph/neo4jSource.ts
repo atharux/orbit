@@ -70,6 +70,9 @@ function nodeToGraphNode(n: any): GraphNode | null {
     verified: typeof p.verified === 'boolean' ? p.verified : undefined,
     district: p.district ?? undefined,
     website: p.website ?? undefined, // now synced full-fidelity — powers the "no website" preset live
+    verticalId: p.vertical_id || undefined,
+    apps: p.apps ? p.apps.split(' · ') : undefined,
+    lastShipped: p.last_shipped || undefined,
   }
 }
 

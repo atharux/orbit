@@ -146,7 +146,68 @@ export const PRESETS: Preset[] = [
       }
     },
   },
+  {
+    id: 'most-connected',
+    q: 'Most-connected companies (degree centrality)',
+    run: g => {
+      // Degree = WORKS_AT (contact->venue) + TARGETS (sequence->venue) edges touching the venue.
+      const degree = new Map<string, number>()
+      for (const l of g.links) {
+        if (l.kind === 'WORKS_AT' || l.kind === 'TARGETS') degree.set(l.target, (degree.get(l.target) ?? 0) + 1)
+      }
+      const top = [...degree.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+      if (!top.length) return { answer: 'No company connections yet.', nodeIds: [] }
+      const labelOf = (id: string) => g.nodes.find(n => n.id === id)?.label ?? id
+      return {
+        answer: 'Best-connected companies — ' + top.map(([id, n]) => `${labelOf(id)} (${n})`).join(' · '),
+        nodeIds: top.map(([id]) => id),
+      }
+    },
+  },
 ]
+
+// --- shortest path between two selected nodes (pure BFS, no Cypher/GDS needed) ---
+
+export function findShortestPath(g: GraphData, fromId: string, toId: string): AskResult {
+  const labelOf = (id: string) => g.nodes.find(n => n.id === id)?.label ?? id
+  if (fromId === toId) return { answer: 'Pick two different nodes to find a path.', nodeIds: [fromId] }
+
+  const adjacent = new Map<string, string[]>()
+  for (const l of g.links) {
+    if (!adjacent.has(l.source)) adjacent.set(l.source, [])
+    if (!adjacent.has(l.target)) adjacent.set(l.target, [])
+    adjacent.get(l.source)!.push(l.target)
+    adjacent.get(l.target)!.push(l.source)
+  }
+
+  const prev = new Map<string, string>()
+  const visited = new Set<string>([fromId])
+  const queue = [fromId]
+  let found = false
+  while (queue.length) {
+    const cur = queue.shift()!
+    if (cur === toId) { found = true; break }
+    for (const next of adjacent.get(cur) ?? []) {
+      if (visited.has(next)) continue
+      visited.add(next); prev.set(next, cur); queue.push(next)
+    }
+  }
+  if (!found) {
+    return {
+      answer: `No path between ${labelOf(fromId)} and ${labelOf(toId)} — they're in disconnected parts of the graph.`,
+      nodeIds: [fromId, toId],
+    }
+  }
+
+  const path: string[] = [toId]
+  for (let cur = toId; cur !== fromId; ) { cur = prev.get(cur)!; path.push(cur) }
+  path.reverse()
+  const hops = path.length - 1
+  return {
+    answer: (hops === 1 ? 'Directly connected: ' : `${hops} hops: `) + path.map(labelOf).join(' → '),
+    nodeIds: path,
+  }
+}
 
 // --- live free-text engine (NL -> Cypher -> Aura) ---------------------------
 

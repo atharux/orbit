@@ -41,6 +41,9 @@ export function App() {
   const [importOpen, setImportOpen] = useState(false)
   const [backupOpen, setBackupOpen] = useState(false)
   const [backupFolder, setBackupFolder] = useState<string | null>(null)
+  const [backupPromptDismissed, setBackupPromptDismissed] = useState(
+    () => localStorage.getItem('pocket-leads:backup-prompt-dismissed') === 'true',
+  )
   const [bulkEnriching, setBulkEnriching] = useState(false)
   const [graphSync, setGraphSync] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle')
   const [graphSyncMsg, setGraphSyncMsg] = useState('')
@@ -338,6 +341,11 @@ export function App() {
     if (activeVerticalId === id) setActiveVerticalId(verticals[0]?.id ?? 'nightlife')
   }
 
+  function dismissBackupPrompt() {
+    localStorage.setItem('pocket-leads:backup-prompt-dismissed', 'true')
+    setBackupPromptDismissed(true)
+  }
+
   function handleSaveSettings(s: AppSettings) {
     saveSettings(s)
     setSettings(s)
@@ -474,6 +482,28 @@ export function App() {
           )}
         </button>
       </header>
+
+      {!loading && !backupFolder && leads.length > 0 && !backupPromptDismissed && (
+        <div
+          className="mono"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px',
+            background: 'rgba(245,158,11,.08)', borderBottom: '1px solid rgba(245,158,11,.25)',
+            fontSize: 11.5, color: 'var(--text)',
+          }}
+        >
+          <span style={{ color: '#f59e0b' }}>⛁ !</span>
+          <span style={{ flex: 1 }}>
+            {leads.length} lead{leads.length === 1 ? '' : 's'} live only in this browser/app's local storage — no backup folder set. Lose this install and they're gone.
+          </span>
+          <button className="btn btn-primary" style={{ height: 26, fontSize: 11 }} onClick={() => setBackupOpen(true)}>
+            Set up backup
+          </button>
+          <button className="btn btn-ghost" style={{ height: 26, fontSize: 11 }} onClick={dismissBackupPrompt}>
+            Not now
+          </button>
+        </div>
+      )}
 
       <VerticalPicker
         verticals={verticals}

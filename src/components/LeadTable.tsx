@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react'
 import type { Lead, Vertical, OutreachStatus } from '../types'
 import { STATUS_LABEL, STATUS_COLOR } from '../types'
 
+// Normalize a stored website into an openable URL (leads often omit the scheme).
+function hrefFor(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`
+}
+
 type SortKey = 'name' | 'city' | 'category' | 'status' | 'updated_at'
 
 interface Props {
@@ -166,7 +171,7 @@ export function LeadTable({ leads, vertical, selectedId, selectedIds, onSelect, 
                 {lead.website ? (
                   <a
                     className="contact-link"
-                    href={lead.website}
+                    href={hrefFor(lead.website)}
                     target="_blank"
                     rel="noreferrer"
                     onClick={e => e.stopPropagation()}
