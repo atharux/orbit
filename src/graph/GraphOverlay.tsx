@@ -12,7 +12,7 @@ import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink } from './neo4jSource'
 import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, type AskResult } from './ask'
-import { logAsk } from './askLog'
+import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
 
@@ -192,7 +192,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // Ask panel state
   const [askInput, setAskInput] = useState('')
   const [asking, setAsking] = useState(false)
-  const [askResult, setAskResult] = useState<(AskResult & { q: string }) | null>(null)
+  const [askResult, setAskResult] = useState<(AskResult & { q: string; queryId: string }) | null>(null)
+  const [askOutcome, setAskOutcome] = useState<AskOutcome | null>(null)
   const [askError, setAskError] = useState('')
   const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
@@ -493,9 +494,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     if (!graphData) return
     setAskError(''); setAskNote('')
     const res = p.run(graphData)
-    setAskResult({ ...res, q: p.q })
+    const queryId = logAsk({ engine: 'preset', question: p.q, nodeIds: res.nodeIds })
+    setAskResult({ ...res, q: p.q, queryId })
+    setAskOutcome(null)
     graphRef.current?.focusNodes(res.nodeIds)
-    logAsk({ engine: 'preset', question: p.q, nodeIds: res.nodeIds })
   }
 
   async function runAsk() {
@@ -505,14 +507,16 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     try {
       if (canAskLive) {
         const res = await askLive(q, openRouterApiKey!, openRouterModel)
-        setAskResult({ ...res, q })
+        const queryId = logAsk({ engine: 'live', question: q, nodeIds: res.nodeIds, cypher: res.cypher })
+        setAskResult({ ...res, q, queryId })
+        setAskOutcome(null)
         graphRef.current?.focusNodes(res.nodeIds)
-        logAsk({ engine: 'live', question: q, nodeIds: res.nodeIds, cypher: res.cypher })
       } else if (canAskLocal) {
         const res = await askLocal(q, graphData, openRouterApiKey!, openRouterModel)
-        setAskResult({ ...res, q })
+        const queryId = logAsk({ engine: 'local', question: q, nodeIds: res.nodeIds })
+        setAskResult({ ...res, q, queryId })
+        setAskOutcome(null)
         graphRef.current?.focusNodes(res.nodeIds)
-        logAsk({ engine: 'local', question: q, nodeIds: res.nodeIds })
       } else {
         setAskNote(openRouterApiKey
           ? 'This graph is too large for local free-text — connect Aura in .env for questions at this scale. Presets still work.'
@@ -526,8 +530,14 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }
 
   function clearAsk() {
-    setAskResult(null); setAskError(''); setAskNote(''); setAskInput('')
+    setAskResult(null); setAskOutcome(null); setAskError(''); setAskNote(''); setAskInput('')
     graphRef.current?.focusNodes([])
+  }
+
+  function rateAsk(outcome: AskOutcome) {
+    if (!askResult) return
+    logOutcome(askResult.queryId, outcome)
+    setAskOutcome(outcome)
   }
 
   // Legend action: light up every node of a kind.
@@ -615,9 +625,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   function findPath() {
     if (!graphData || selectedIds.length !== 2) return
     const res = findShortestPath(graphData, selectedIds[0], selectedIds[1])
-    setAskResult({ ...res, q: 'Shortest path between selection' })
+    const queryId = logAsk({ engine: 'path', question: 'Shortest path between selection', nodeIds: res.nodeIds })
+    setAskResult({ ...res, q: 'Shortest path between selection', queryId })
+    setAskOutcome(null)
     graphRef.current?.focusNodes(res.nodeIds)
-    logAsk({ engine: 'path', question: 'Shortest path between selection', nodeIds: res.nodeIds })
   }
 
   const stats = graphData ? computeStats(graphData) : null
@@ -909,7 +920,24 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               {askResult.cypher && (
                 <pre style={styles.cypher}>{askResult.cypher}</pre>
               )}
-              <button style={styles.clearBtn} onClick={clearAsk}>clear</button>
+              <div style={styles.rateRow}>
+                <span style={styles.rateLabel}>Useful?</span>
+                <button
+                  style={{ ...styles.rateBtn, ...(askOutcome === 'positive' ? styles.rateBtnActive : {}) }}
+                  onClick={() => rateAsk('positive')}
+                  title="Good answer"
+                >
+                  👍
+                </button>
+                <button
+                  style={{ ...styles.rateBtn, ...(askOutcome === 'negative' ? styles.rateBtnActive : {}) }}
+                  onClick={() => rateAsk('negative')}
+                  title="Not useful"
+                >
+                  👎
+                </button>
+                <button style={styles.clearBtn} onClick={clearAsk}>clear</button>
+              </div>
             </div>
           )}
 
@@ -1107,9 +1135,16 @@ function makeStyles(mode: ThemeMode): Styles {
       whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflowY: 'auto',
     },
     clearBtn: {
-      marginTop: 8, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4,
+      background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4,
       color: t.muted, cursor: 'pointer', fontSize: 10, padding: '4px 10px', fontFamily: mono,
     },
+    rateRow: { marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 },
+    rateLabel: { fontSize: 10, color: t.faint, marginRight: 2 },
+    rateBtn: {
+      background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4,
+      cursor: 'pointer', fontSize: 12, padding: '3px 7px', lineHeight: 1, opacity: 0.6,
+    },
+    rateBtnActive: { opacity: 1, borderColor: t.accent, background: t.accentDim },
     legend: {
       position: 'absolute', left: 20, bottom: 20, zIndex: 2, display: 'flex', flexDirection: 'column', gap: 6,
       background: t.legend, border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 12px',

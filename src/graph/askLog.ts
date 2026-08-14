@@ -12,6 +12,8 @@ const MAX_ENTRIES = 500
 
 export type AskEngine = 'preset' | 'live' | 'local' | 'path'
 
+export type AskOutcome = 'positive' | 'negative'
+
 export interface AskLogEntry {
   query_id: string
   timestamp: string
@@ -19,6 +21,7 @@ export interface AskLogEntry {
   question: string
   node_ids: string[]
   cypher?: string
+  outcome?: AskOutcome
 }
 
 function newId(): string {
@@ -27,8 +30,17 @@ function newId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+function readLog(): AskLogEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(LS_KEY) ?? '[]')
+  } catch {
+    return []
+  }
+}
+
 // Best-effort: a full/unavailable localStorage must never break the ask flow.
-export function logAsk(entry: { engine: AskEngine; question: string; nodeIds: string[]; cypher?: string }): void {
+// Returns the generated query_id so a caller can attach an outcome later via logOutcome.
+export function logAsk(entry: { engine: AskEngine; question: string; nodeIds: string[]; cypher?: string }): string {
   const record: AskLogEntry = {
     query_id: newId(),
     timestamp: new Date().toISOString(),
@@ -38,11 +50,27 @@ export function logAsk(entry: { engine: AskEngine; question: string; nodeIds: st
     ...(entry.cypher ? { cypher: entry.cypher } : {}),
   }
   try {
-    let log: AskLogEntry[] = JSON.parse(localStorage.getItem(LS_KEY) ?? '[]')
+    let log = readLog()
     log.push(record)
     if (log.length > MAX_ENTRIES) log = log.slice(log.length - MAX_ENTRIES)
     localStorage.setItem(LS_KEY, JSON.stringify(log))
   } catch {
     // storage full, disabled, or corrupt — logging is best-effort only
+  }
+  return record.query_id
+}
+
+// Attaches a thumbs up/down to a previously logged entry. No-op if the entry
+// was already evicted by the 500-entry cap — outcome logging is best-effort,
+// same as logAsk.
+export function logOutcome(queryId: string, outcome: AskOutcome): void {
+  try {
+    const log = readLog()
+    const entry = log.find(e => e.query_id === queryId)
+    if (!entry) return
+    entry.outcome = outcome
+    localStorage.setItem(LS_KEY, JSON.stringify(log))
+  } catch {
+    // best-effort only
   }
 }
