@@ -12,6 +12,7 @@ import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink } from './neo4jSource'
 import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, type AskResult } from './ask'
+import { logAsk } from './askLog'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
 
@@ -494,6 +495,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     const res = p.run(graphData)
     setAskResult({ ...res, q: p.q })
     graphRef.current?.focusNodes(res.nodeIds)
+    logAsk({ engine: 'preset', question: p.q, nodeIds: res.nodeIds })
   }
 
   async function runAsk() {
@@ -505,10 +507,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         const res = await askLive(q, openRouterApiKey!, openRouterModel)
         setAskResult({ ...res, q })
         graphRef.current?.focusNodes(res.nodeIds)
+        logAsk({ engine: 'live', question: q, nodeIds: res.nodeIds, cypher: res.cypher })
       } else if (canAskLocal) {
         const res = await askLocal(q, graphData, openRouterApiKey!, openRouterModel)
         setAskResult({ ...res, q })
         graphRef.current?.focusNodes(res.nodeIds)
+        logAsk({ engine: 'local', question: q, nodeIds: res.nodeIds })
       } else {
         setAskNote(openRouterApiKey
           ? 'This graph is too large for local free-text — connect Aura in .env for questions at this scale. Presets still work.'
@@ -613,6 +617,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     const res = findShortestPath(graphData, selectedIds[0], selectedIds[1])
     setAskResult({ ...res, q: 'Shortest path between selection' })
     graphRef.current?.focusNodes(res.nodeIds)
+    logAsk({ engine: 'path', question: 'Shortest path between selection', nodeIds: res.nodeIds })
   }
 
   const stats = graphData ? computeStats(graphData) : null
