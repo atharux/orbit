@@ -1,4 +1,5 @@
 import type { GraphData, GraphLink } from './types'
+import type { Vertical } from '../types'
 import { callOpenRouter } from '../services/orClient'
 import { runReadCypher, isLiveConfigured } from './neo4jSource'
 
@@ -16,6 +17,8 @@ export interface AskResult {
 export interface Preset {
   id: string
   q: string
+  category: string
+  verticalId?: string // set only for vertical-scoped presets — undefined means generic
   run: (g: GraphData) => AskResult
 }
 
@@ -34,6 +37,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'unenrolled-verified',
     q: 'Verified contacts not in any sequence',
+    category: 'Verification',
     run: g => {
       const enrolled = new Set(linksOfKind(g, 'ENROLLED_IN').map(l => l.source))
       const hits = nodesOfKind(g, 'contact').filter(c => c.verified && !enrolled.has(c.id))
@@ -48,6 +52,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'venues-no-verified-contact',
     q: 'Companies with no verified contact',
+    category: 'Coverage',
     run: g => {
       const worksAt = linksOfKind(g, 'WORKS_AT') // contact -> venue
       const verified = new Set(nodesOfKind(g, 'contact').filter(c => c.verified).map(c => c.id))
@@ -64,6 +69,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'seq-multi-verified',
     q: 'Sequences hitting companies with 2+ verified contacts',
+    category: 'Outreach',
     run: g => {
       const worksAt = linksOfKind(g, 'WORKS_AT')
       const verified = new Set(nodesOfKind(g, 'contact').filter(c => c.verified).map(c => c.id))
@@ -85,6 +91,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'venues-per-district',
     q: 'Company count by district',
+    category: 'Structure',
     run: g => {
       const byDistrict = new Map<string, number>()
       for (const v of nodesOfKind(g, 'venue')) {
@@ -103,6 +110,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'top-source',
     q: 'Which source verified the most contacts',
+    category: 'Verification',
     run: g => {
       const verifiedBy = linksOfKind(g, 'VERIFIED_BY') // contact -> source
       const perSource = new Map<string, number>()
@@ -121,6 +129,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'no-website',
     q: 'Companies with no website',
+    category: 'Coverage',
     run: g => {
       const hits = nodesOfKind(g, 'venue').filter(v => !v.website)
       return {
@@ -134,6 +143,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'targeted-no-contact',
     q: 'Companies targeted by a sequence but with zero contacts',
+    category: 'Coverage',
     run: g => {
       const targeted = new Set(linksOfKind(g, 'TARGETS').map(l => l.target))
       const hasContact = new Set(linksOfKind(g, 'WORKS_AT').map(l => l.target))
@@ -149,6 +159,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'most-connected',
     q: 'Most-connected companies (degree centrality)',
+    category: 'Structure',
     run: g => {
       // Degree = WORKS_AT (contact->venue) + TARGETS (sequence->venue) edges touching the venue.
       const degree = new Map<string, number>()
@@ -164,7 +175,318 @@ export const PRESETS: Preset[] = [
       }
     },
   },
+  {
+    id: 'no-contact-at-all',
+    q: 'Companies with no contact at all',
+    category: 'Coverage',
+    run: g => {
+      const hasContact = new Set(linksOfKind(g, 'WORKS_AT').map(l => l.target))
+      const hits = nodesOfKind(g, 'venue').filter(v => !hasContact.has(v.id))
+      return {
+        answer: hits.length
+          ? `${hits.length} ${hits.length === 1 ? 'company has' : 'companies have'} no contact on file at all — not even an unverified one.`
+          : 'Every company has at least one contact on file.',
+        nodeIds: hits.map(v => v.id),
+      }
+    },
+  },
+  {
+    id: 'districts-no-verified',
+    q: 'Districts with zero verified contacts',
+    category: 'Coverage',
+    run: g => {
+      const worksAt = linksOfKind(g, 'WORKS_AT') // contact -> venue
+      const verified = new Set(nodesOfKind(g, 'contact').filter(c => c.verified).map(c => c.id))
+      const venueById = new Map(nodesOfKind(g, 'venue').map(v => [v.id, v]))
+      const verifiedDistricts = new Set<string>()
+      for (const l of worksAt) {
+        if (!verified.has(l.source)) continue
+        const d = venueById.get(l.target)?.district
+        if (d) verifiedDistricts.add(d)
+      }
+      const allDistricts = new Set(nodesOfKind(g, 'venue').map(v => v.district).filter((d): d is string => Boolean(d)))
+      const hits = [...allDistricts].filter(d => !verifiedDistricts.has(d))
+      const hitVenues = nodesOfKind(g, 'venue').filter(v => v.district && hits.includes(v.district))
+      return {
+        answer: hits.length
+          ? `${hits.length} district${hits.length === 1 ? '' : 's'} with no verified contact yet — ${hits.join(', ')}.`
+          : 'Every district with companies has at least one verified contact.',
+        nodeIds: hitVenues.map(v => v.id),
+      }
+    },
+  },
+  {
+    id: 'unverified-contacts',
+    q: 'Contacts not yet verified',
+    category: 'Verification',
+    run: g => {
+      const hits = nodesOfKind(g, 'contact').filter(c => !c.verified)
+      return {
+        answer: hits.length
+          ? `${hits.length} contact${hits.length === 1 ? '' : 's'} still unverified.`
+          : 'Every contact on file is verified.',
+        nodeIds: hits.map(c => c.id),
+      }
+    },
+  },
+  {
+    id: 'multi-source-verified',
+    q: 'Contacts verified by more than one source',
+    category: 'Verification',
+    run: g => {
+      const verifiedBy = linksOfKind(g, 'VERIFIED_BY') // contact -> source
+      const perContact = new Map<string, number>()
+      for (const l of verifiedBy) perContact.set(l.source, (perContact.get(l.source) ?? 0) + 1)
+      const hitIds = [...perContact.entries()].filter(([, n]) => n > 1).map(([id]) => id)
+      return {
+        answer: hitIds.length
+          ? `${hitIds.length} contact${hitIds.length === 1 ? '' : 's'} independently verified by more than one source — your highest-confidence leads.`
+          : 'No contact is currently verified by more than one source.',
+        nodeIds: hitIds,
+      }
+    },
+  },
+  {
+    id: 'source-coverage',
+    q: 'Companies each source has touched',
+    category: 'Verification',
+    run: g => {
+      const verifiedBy = linksOfKind(g, 'VERIFIED_BY') // contact -> source
+      const worksAt = new Map(linksOfKind(g, 'WORKS_AT').map(l => [l.source, l.target])) // contact -> venue
+      const perSource = new Map<string, Set<string>>()
+      for (const l of verifiedBy) {
+        const venueId = worksAt.get(l.source)
+        if (!venueId) continue
+        if (!perSource.has(l.target)) perSource.set(l.target, new Set())
+        perSource.get(l.target)!.add(venueId)
+      }
+      const top = [...perSource.entries()].sort((a, b) => b[1].size - a[1].size).slice(0, 5)
+      if (!top.length) return { answer: 'No source has reached a company yet.', nodeIds: [] }
+      const labelOf = (id: string) => g.nodes.find(n => n.id === id)?.label ?? id
+      return {
+        answer: 'Companies reached per source — ' + top.map(([id, venues]) => `${labelOf(id)} (${venues.size})`).join(' · '),
+        nodeIds: top.flatMap(([id, venues]) => [id, ...venues]),
+      }
+    },
+  },
+  {
+    id: 'dead-sequences',
+    q: 'Sequences with no enrolled contacts',
+    category: 'Outreach',
+    run: g => {
+      const enrolledSeqs = new Set(linksOfKind(g, 'ENROLLED_IN').map(l => l.target))
+      const hits = nodesOfKind(g, 'sequence').filter(s => !enrolledSeqs.has(s.id))
+      return {
+        answer: hits.length
+          ? `${hits.length} sequence${hits.length === 1 ? '' : 's'} with nobody enrolled — live but empty.`
+          : 'Every sequence has at least one enrolled contact.',
+        nodeIds: hits.map(s => s.id),
+      }
+    },
+  },
+  {
+    id: 'top-sequence',
+    q: 'Sequence with the most enrolled contacts',
+    category: 'Outreach',
+    run: g => {
+      const enrolled = linksOfKind(g, 'ENROLLED_IN') // contact -> sequence
+      const perSeq = new Map<string, number>()
+      for (const l of enrolled) perSeq.set(l.target, (perSeq.get(l.target) ?? 0) + 1)
+      const top = [...perSeq.entries()].sort((a, b) => b[1] - a[1])[0]
+      if (!top) return { answer: 'No sequence has any contacts enrolled yet.', nodeIds: [] }
+      const [seqId, count] = top
+      const label = g.nodes.find(n => n.id === seqId)?.label ?? seqId
+      const contacts = enrolled.filter(l => l.target === seqId).map(l => l.source)
+      return {
+        answer: `${label} has the most contacts enrolled (${count}).`,
+        nodeIds: [seqId, ...contacts],
+      }
+    },
+  },
+  {
+    id: 'multi-sequence-venues',
+    q: 'Companies targeted by more than one sequence',
+    category: 'Outreach',
+    run: g => {
+      const targets = linksOfKind(g, 'TARGETS') // sequence -> venue
+      const perVenue = new Map<string, Set<string>>()
+      for (const l of targets) {
+        if (!perVenue.has(l.target)) perVenue.set(l.target, new Set())
+        perVenue.get(l.target)!.add(l.source)
+      }
+      const hits = [...perVenue.entries()].filter(([, seqs]) => seqs.size > 1)
+      return {
+        answer: hits.length
+          ? `${hits.length} ${hits.length === 1 ? 'company is' : 'companies are'} targeted by more than one sequence — possible outreach overlap.`
+          : 'No company is targeted by more than one sequence.',
+        nodeIds: hits.flatMap(([venueId, seqs]) => [venueId, ...seqs]),
+      }
+    },
+  },
+  {
+    id: 'enrolled-not-verified',
+    q: 'Contacts enrolled in a sequence but never verified',
+    category: 'Outreach',
+    run: g => {
+      const enrolledIds = new Set(linksOfKind(g, 'ENROLLED_IN').map(l => l.source))
+      const hits = nodesOfKind(g, 'contact').filter(c => enrolledIds.has(c.id) && !c.verified)
+      return {
+        answer: hits.length
+          ? `${hits.length} contact${hits.length === 1 ? '' : 's'} in an active sequence but never verified — outreach running on an unconfirmed lead.`
+          : 'Every enrolled contact is verified.',
+        nodeIds: hits.map(c => c.id),
+      }
+    },
+  },
+  {
+    id: 'isolated-nodes',
+    q: 'Nodes with no connections at all',
+    category: 'Structure',
+    run: g => {
+      const touched = new Set<string>()
+      for (const l of g.links) { touched.add(l.source); touched.add(l.target) }
+      const hits = g.nodes.filter(n => !touched.has(n.id))
+      return {
+        answer: hits.length
+          ? `${hits.length} node${hits.length === 1 ? '' : 's'} completely disconnected from the rest of the graph.`
+          : 'Every node has at least one connection.',
+        nodeIds: hits.map(n => n.id),
+      }
+    },
+  },
+  {
+    id: 'contacts-per-venue',
+    q: 'Companies with the most verified contacts',
+    category: 'Structure',
+    run: g => {
+      const worksAt = linksOfKind(g, 'WORKS_AT') // contact -> venue
+      const verified = new Set(nodesOfKind(g, 'contact').filter(c => c.verified).map(c => c.id))
+      const perVenue = new Map<string, number>()
+      for (const l of worksAt) if (verified.has(l.source)) perVenue.set(l.target, (perVenue.get(l.target) ?? 0) + 1)
+      const top = [...perVenue.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+      if (!top.length) return { answer: 'No company has a verified contact yet.', nodeIds: [] }
+      const labelOf = (id: string) => g.nodes.find(n => n.id === id)?.label ?? id
+      return {
+        answer: 'Most verified contacts — ' + top.map(([id, n]) => `${labelOf(id)} (${n})`).join(' · '),
+        nodeIds: top.map(([id]) => id),
+      }
+    },
+  },
 ]
+
+// --- vertical-scoped questions ----------------------------------------------
+// Same shape as PRESETS, but filtered to one vertical's venues/contacts. Built
+// from a Vertical rather than hardcoded so custom verticals get scoped
+// questions for free, no extra wiring needed.
+
+export function verticalPresets(v: Vertical): Preset[] {
+  const inVertical = (n: { verticalId?: string }) => n.verticalId === v.id
+
+  const presets: Preset[] = [
+    {
+      id: `v-${v.id}-no-verified`,
+      q: `${v.name} companies with no verified contact`,
+      category: v.name,
+      verticalId: v.id,
+      run: g => {
+        const worksAt = linksOfKind(g, 'WORKS_AT') // contact -> venue
+        const verified = new Set(nodesOfKind(g, 'contact').filter(c => c.verified).map(c => c.id))
+        const venuesWithVerified = new Set(worksAt.filter(l => verified.has(l.source)).map(l => l.target))
+        const hits = nodesOfKind(g, 'venue').filter(inVertical).filter(v2 => !venuesWithVerified.has(v2.id))
+        return {
+          answer: hits.length
+            ? `${hits.length} ${v.name.toLowerCase()} ${hits.length === 1 ? 'company has' : 'companies have'} no verified contact yet.`
+            : `Every ${v.name.toLowerCase()} company has a verified contact.`,
+          nodeIds: hits.map(v2 => v2.id),
+        }
+      },
+    },
+    {
+      id: `v-${v.id}-no-website`,
+      q: `${v.name} companies with no website`,
+      category: v.name,
+      verticalId: v.id,
+      run: g => {
+        const hits = nodesOfKind(g, 'venue').filter(inVertical).filter(v2 => !v2.website)
+        return {
+          answer: hits.length
+            ? `${hits.length} ${v.name.toLowerCase()} ${hits.length === 1 ? 'company has' : 'companies have'} no website on file.`
+            : `Every ${v.name.toLowerCase()} company has a website on file.`,
+          nodeIds: hits.map(v2 => v2.id),
+        }
+      },
+    },
+    {
+      id: `v-${v.id}-most-connected`,
+      q: `Best-connected ${v.name.toLowerCase()} companies`,
+      category: v.name,
+      verticalId: v.id,
+      run: g => {
+        const venueIds = new Set(nodesOfKind(g, 'venue').filter(inVertical).map(v2 => v2.id))
+        const degree = new Map<string, number>()
+        for (const l of g.links) {
+          if ((l.kind === 'WORKS_AT' || l.kind === 'TARGETS') && venueIds.has(l.target)) {
+            degree.set(l.target, (degree.get(l.target) ?? 0) + 1)
+          }
+        }
+        const top = [...degree.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+        if (!top.length) return { answer: `No ${v.name.toLowerCase()} company connections yet.`, nodeIds: [] }
+        const labelOf = (id: string) => g.nodes.find(n => n.id === id)?.label ?? id
+        return {
+          answer: `Best-connected ${v.name.toLowerCase()} companies — ` + top.map(([id, n]) => `${labelOf(id)} (${n})`).join(' · '),
+          nodeIds: top.map(([id]) => id),
+        }
+      },
+    },
+  ]
+
+  if (v.id === 'dev-studios') {
+    const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+    presets.push(
+      {
+        id: 'v-dev-studios-stale',
+        q: "iOS studios that haven't shipped in over a year",
+        category: v.name,
+        verticalId: v.id,
+        run: g => {
+          const now = Date.now()
+          const hits = nodesOfKind(g, 'venue').filter(inVertical).filter(v2 => {
+            if (!v2.lastShipped) return true
+            const t = Date.parse(v2.lastShipped)
+            return Number.isNaN(t) || now - t > ONE_YEAR_MS
+          })
+          return {
+            answer: hits.length
+              ? `${hits.length} studio${hits.length === 1 ? '' : 's'} with no App Store release in over a year.`
+              : 'Every studio has shipped within the last year.',
+            nodeIds: hits.map(v2 => v2.id),
+          }
+        },
+      },
+      {
+        id: 'v-dev-studios-prolific',
+        q: 'iOS studios with the most apps published',
+        category: v.name,
+        verticalId: v.id,
+        run: g => {
+          const top = nodesOfKind(g, 'venue')
+            .filter(inVertical)
+            .map(v2 => [v2, v2.apps?.length ?? 0] as const)
+            .filter(([, n]) => n > 0)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+          if (!top.length) return { answer: 'No studio has an app catalogue on file yet.', nodeIds: [] }
+          return {
+            answer: 'Most apps published — ' + top.map(([v2, n]) => `${v2.label} (${n})`).join(' · '),
+            nodeIds: top.map(([v2]) => v2.id),
+          }
+        },
+      },
+    )
+  }
+
+  return presets
+}
 
 // --- shortest path between two selected nodes (pure BFS, no Cypher/GDS needed) ---
 

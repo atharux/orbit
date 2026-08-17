@@ -11,7 +11,7 @@ import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink } from './neo4jSource'
-import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, type AskResult } from './ask'
+import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, verticalPresets, type AskResult, type Preset } from './ask'
 import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
@@ -490,7 +490,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     graphRef.current?.applyTheme?.(CANVAS[theme])
   }, [theme])
 
-  function runPreset(p: typeof PRESETS[number]) {
+  function runPreset(p: Preset) {
     if (!graphData) return
     setAskError(''); setAskNote('')
     const res = p.run(graphData)
@@ -647,6 +647,14 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     ? verticals.filter(v => graphData.nodes.some(n => n.verticalId === v.id))
     : []
   const hasVerifiedNodes = graphData ? graphData.nodes.some(n => n.verified) : false
+
+  // Ask-panel catalogue: generic presets grouped by category, plus one group
+  // per vertical actually present in this graph (built-in or custom).
+  const PRESET_CATEGORY_ORDER = ['Coverage', 'Verification', 'Outreach', 'Structure']
+  const presetGroups: { name: string; presets: Preset[] }[] = [
+    ...PRESET_CATEGORY_ORDER.map(name => ({ name, presets: PRESETS.filter(p => p.category === name) })),
+    ...presentVerticals.map(v => ({ name: v.name, presets: verticalPresets(v) })),
+  ]
 
   // Live Aura instance metadata + schema counts for the "it's real" demo chrome.
   const instance = meta?.origin === 'live' ? liveInstanceInfo() : null
@@ -902,11 +910,18 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             </button>
           </div>
 
-          <div style={styles.presetList}>
-            {PRESETS.map(p => (
-              <button key={p.id} style={styles.presetChip} onClick={() => runPreset(p)}>
-                {p.q}
-              </button>
+          <div style={styles.presetScroll}>
+            {presetGroups.filter(grp => grp.presets.length > 0).map(grp => (
+              <div key={grp.name}>
+                <div style={styles.presetCategoryHead}>{grp.name.toUpperCase()}</div>
+                <div style={styles.presetList}>
+                  {grp.presets.map(p => (
+                    <button key={p.id} style={styles.presetChip} onClick={() => runPreset(p)}>
+                      {p.q}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 
@@ -1113,7 +1128,9 @@ function makeStyles(mode: ThemeMode): Styles {
     },
     chipDot: { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 },
     filterDivider: { borderTop: `1px solid ${t.border}`, margin: '12px 0' },
-    presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10 },
+    presetScroll: { maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 },
+    presetCategoryHead: { fontSize: 9, letterSpacing: '.16em', color: t.faint, marginTop: 6 },
+    presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 },
     presetChip: {
       textAlign: 'left', background: t.btn, border: `1px solid ${t.border}`, borderRadius: 4,
       padding: '7px 9px', color: t.text2, cursor: 'pointer', fontSize: 11, lineHeight: 1.35, fontFamily: mono,
