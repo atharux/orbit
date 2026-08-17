@@ -130,7 +130,7 @@ Rules: 3-6 steps, strictly increasing day_offset starting at 0, realistic cadenc
 
   function createFromTemplate(tpl: SequenceTemplate) {
     const seq = newSequence(tpl.name)
-    const withSteps = { ...seq, steps: tpl.steps.map(st => ({ id: uid('step'), day_offset: st.day_offset, channel: st.channel, subject: st.subject, body: '' })) }
+    const withSteps = { ...seq, steps: tpl.steps.map(st => ({ id: uid('step'), day_offset: st.day_offset, channel: st.channel, subject: st.subject, body: st.body ?? '' })) }
     commit([...sequences, withSteps])
     setSelectedId(withSteps.id); setEditingStepId(null); setPicker(false)
   }
