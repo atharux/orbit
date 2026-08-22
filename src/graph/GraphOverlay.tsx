@@ -252,6 +252,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       const nodeIsHot = (n: any) => highlightNodes.size === 0 || highlightNodes.has(n.id)
       // Live canvas theme — read fresh on every accessor call so applyTheme() takes effect.
       const ct = () => canvasThemeRef.current
+      // SpriteText instances keyed by node id, so refreshHighlight() can restyle
+      // labels in place on every click (cheap) instead of going through
+      // .nodeThreeObject(...) again, which forces 3d-force-graph to clear and
+      // rebuild every node's Object3D — fine for a rare theme toggle, too
+      // expensive to run on every single selection change.
+      const labelById = new Map<string, SpriteText>()
 
       const linkRestColor = (l: any) =>
         highlightLinks.has(l) ? ct().linkFull[l.kind as GraphLink['kind']]
@@ -281,6 +287,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           t.borderRadius = 2.5
           t.padding = 2.2
           t.position.set(0, kind === 'venue' ? 11 : kind === 'sequence' ? 10 : 8, 0)
+          labelById.set(n.id, t)
           return t
         })
         // Hover card carries the detail so the always-on labels stay short.
@@ -363,11 +370,21 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       function refreshHighlight() {
         Graph.nodeColor(Graph.nodeColor())
-          .nodeThreeObject(Graph.nodeThreeObject()) // rebuild labels so non-neighbors fade too, not just the node dot
           .linkColor(Graph.linkColor())
           .linkWidth(Graph.linkWidth())
           .linkDirectionalArrowColor(Graph.linkDirectionalArrowColor())
           .linkDirectionalParticles(Graph.linkDirectionalParticles())
+        // Restyle existing label sprites in place (cheap) so non-neighbors fade
+        // too, not just the node dot — see labelById above for why this isn't
+        // a .nodeThreeObject(...) call.
+        for (const n of Graph.graphData().nodes as any[]) {
+          const t = labelById.get(n.id)
+          if (!t) continue
+          const hot = nodeIsHot(n)
+          t.color = hot ? ct().labelText : ct().labelTextDim
+          t.backgroundColor = hot ? ct().labelBg : ct().labelBgDim
+          t.borderColor = hot ? ct().labelBorder : ct().labelBorderDim
+        }
       }
 
       function selectNode(node: any) {
