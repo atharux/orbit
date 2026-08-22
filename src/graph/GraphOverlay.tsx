@@ -64,6 +64,10 @@ interface CanvasTheme {
   node: Record<GraphNode['kind'], string>; dim: string
   linkFull: Record<GraphLink['kind'], string>; linkRest: Record<GraphLink['kind'], string>; linkFade: string
   labelText: string; labelBg: string; labelBorder: string
+  // Faded label styling for non-neighbor nodes once something is selected —
+  // without this, every label renders at full prominence regardless of
+  // selection and dense clusters turn into an unreadable wall of text.
+  labelTextDim: string; labelBgDim: string; labelBorderDim: string
 }
 
 // Dark = the original immersive space; light = an engraved cream "plate" (no
@@ -73,11 +77,13 @@ const CANVAS: Record<ThemeMode, CanvasTheme> = {
     bg: '#05060a', bloom: 0.32, stars: true, node: KIND_COLOR, dim: DIM,
     linkFull: LINK_COLOR, linkRest: LINK_DIM, linkFade: '#151b26',
     labelText: '#dfe6f0', labelBg: 'rgba(6,8,13,0.82)', labelBorder: 'rgba(120,132,148,0.18)',
+    labelTextDim: 'rgba(223,230,240,0.25)', labelBgDim: 'rgba(6,8,13,0.35)', labelBorderDim: 'rgba(120,132,148,0.06)',
   },
   light: {
     bg: '#efeadd', bloom: 0, stars: false, node: KIND_COLOR_LIGHT, dim: '#cfc7b5',
     linkFull: LINK_COLOR_LIGHT, linkRest: LINK_DIM_LIGHT, linkFade: '#ddd5c2',
     labelText: '#201e18', labelBg: 'rgba(246,242,231,0.92)', labelBorder: 'rgba(32,30,24,0.22)',
+    labelTextDim: 'rgba(32,30,24,0.25)', labelBgDim: 'rgba(246,242,231,0.35)', labelBorderDim: 'rgba(32,30,24,0.06)',
   },
 }
 
@@ -263,13 +269,14 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         .nodeThreeObjectExtend(true)
         .nodeThreeObject((n: any) => {
           const kind = n.kind as GraphNode['kind']
+          const hot = nodeIsHot(n)
           const t = new SpriteText(n.label)
-          t.color = ct().labelText
+          t.color = hot ? ct().labelText : ct().labelTextDim
           t.fontFace = 'DM Mono, ui-monospace, monospace'
           t.fontWeight = '600'
           t.textHeight = kind === 'venue' || kind === 'sequence' ? 3.4 : 2.4
-          t.backgroundColor = ct().labelBg
-          t.borderColor = ct().labelBorder
+          t.backgroundColor = hot ? ct().labelBg : ct().labelBgDim
+          t.borderColor = hot ? ct().labelBorder : ct().labelBorderDim
           t.borderWidth = 0.15
           t.borderRadius = 2.5
           t.padding = 2.2
@@ -356,6 +363,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       function refreshHighlight() {
         Graph.nodeColor(Graph.nodeColor())
+          .nodeThreeObject(Graph.nodeThreeObject()) // rebuild labels so non-neighbors fade too, not just the node dot
           .linkColor(Graph.linkColor())
           .linkWidth(Graph.linkWidth())
           .linkDirectionalArrowColor(Graph.linkDirectionalArrowColor())
@@ -799,6 +807,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               {neighbors.length > 0 && (
                 <div style={styles.connections}>
                   <div style={styles.connHead}>{neighbors.length} connection{neighbors.length === 1 ? '' : 's'} · click to jump</div>
+                  <NeighborFan
+                    centerLabel={selected.label} centerColor={nodeCol[selected.kind]}
+                    neighbors={neighbors} nodeCol={nodeCol} relCol={relCol}
+                    onJump={id => graphRef.current?.selectNodeById(id)}
+                    textColor={panelTokens(theme).text2} bgColor={panelTokens(theme).card}
+                  />
+                  {neighbors.length > 8 && (
+                    <div style={{ ...styles.connHead, marginTop: 4, marginBottom: 0 }}>+{neighbors.length - 8} more below</div>
+                  )}
                   {neighbors.map((nb, i) => (
                     <button key={i} style={styles.connRow} onClick={() => graphRef.current?.selectNodeById(nb.id)}>
                       <span style={{ ...styles.connDot, background: nodeCol[nb.node.kind] }} />
@@ -1037,6 +1054,59 @@ function Stat({ label, value, color, s }: { label: string; value: number; color:
       <div style={{ ...s.statValue, color }}>{value}</div>
       <div style={s.statLabel}>{label}</div>
     </div>
+  )
+}
+
+// A spatial complement to the connections list below it: the selected node
+// stays fixed at center while its neighbors ring around it, each on its own
+// spoke, instead of every business name competing for the same packed patch
+// of 3D space. Capped to the first 8 — the full set is still in the list.
+function truncateLabel(s: string, max = 13): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
+function NeighborFan({
+  centerLabel, centerColor, neighbors, nodeCol, relCol, onJump, textColor, bgColor,
+}: {
+  centerLabel: string; centerColor: string; neighbors: Neighbor[]
+  nodeCol: Record<GraphNode['kind'], string>; relCol: Record<GraphLink['kind'], string>
+  onJump: (id: string) => void; textColor: string; bgColor: string
+}) {
+  const size = 216
+  const cx = size / 2
+  const cy = size / 2
+  const r = 78
+  const shown = neighbors.slice(0, 8)
+  return (
+    <svg width="100%" viewBox={`0 0 ${size} ${size}`} style={{ display: 'block', overflow: 'visible' }}>
+      {shown.map((nb, i) => {
+        const angle = (2 * Math.PI * i) / shown.length - Math.PI / 2
+        const x = cx + r * Math.cos(angle)
+        const y = cy + r * Math.sin(angle)
+        const onRight = x >= cx
+        return (
+          <g key={nb.id} style={{ cursor: 'pointer' }} onClick={() => onJump(nb.id)}>
+            <title>{nb.node.label}</title>
+            <line x1={cx} y1={cy} x2={x} y2={y} stroke={relCol[nb.rel]} strokeWidth={1} opacity={0.55} />
+            <circle cx={x} cy={y} r={5} fill={nodeCol[nb.node.kind]} stroke={bgColor} strokeWidth={1.5} />
+            <text
+              x={x + (onRight ? 8 : -8)} y={y}
+              textAnchor={onRight ? 'start' : 'end'} dominantBaseline="middle"
+              fontFamily="'DM Mono', monospace" fontSize={9} fill={textColor}
+            >
+              {truncateLabel(nb.node.label)}
+            </text>
+          </g>
+        )
+      })}
+      <circle cx={cx} cy={cy} r={8} fill={centerColor} stroke={bgColor} strokeWidth={2} />
+      <text
+        x={cx} y={cy + 20} textAnchor="middle"
+        fontFamily="'DM Mono', monospace" fontSize={9} fontWeight={700} fill={textColor}
+      >
+        {truncateLabel(centerLabel, 20)}
+      </text>
+    </svg>
   )
 }
 
