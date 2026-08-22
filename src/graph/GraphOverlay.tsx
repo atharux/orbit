@@ -16,8 +16,9 @@ import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
 // Lazy: CypherEditor pulls in CodeMirror + the ANTLR-based Cypher grammar,
-// and only ever renders when isLiveConfigured() -- code-split so that cost
-// isn't paid by everyone loading the graph, only by users with Aura wired up.
+// and only ever renders when meta?.origin === 'live' -- code-split so that
+// cost isn't paid by everyone loading the graph, only once a live Aura
+// connection is actually up.
 const CypherEditor = lazy(() => import('./CypherEditor'))
 
 const CYPHER_TUTORIAL_URL = 'https://claude.ai/code/artifact/7587b27c-e615-4881-ab98-c705d636b94e'
@@ -527,9 +528,19 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     graphRef.current?.applyTheme?.(CANVAS[theme])
   }, [theme])
 
+  // Every ask-panel entry point (preset, NL, Cypher, path) writes into this
+  // same askResult -- one busy flag and one "clear all transient state"
+  // helper so a fix to how one clears its errors can't drift from the
+  // others the way runCypher's did before this pass (it cleared cypherError,
+  // nothing else did).
+  const busy = asking || cypherRunning
+  function clearTransientAskState() {
+    setAskError(''); setCypherError(''); setAskNote('')
+  }
+
   function runPreset(p: Preset) {
-    if (!graphData) return
-    setAskError(''); setAskNote('')
+    if (!graphData || busy) return
+    clearTransientAskState()
     const res = p.run(graphData)
     const queryId = logAsk({ engine: 'preset', question: p.q, nodeIds: res.nodeIds })
     setAskResult({ ...res, q: p.q, queryId })
@@ -539,8 +550,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
   async function runAsk() {
     const q = askInput.trim()
-    if (!q || !graphData || asking || cypherRunning) return
-    setAskError(''); setAskNote(''); setAsking(true); setAskResult(null)
+    if (!q || !graphData || busy) return
+    clearTransientAskState(); setAsking(true); setAskResult(null)
     try {
       if (canAskLive) {
         const res = await askLive(q, openRouterApiKey!, openRouterModel)
@@ -567,18 +578,21 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }
 
   function clearAsk() {
-    setAskResult(null); setAskOutcome(null); setAskError(''); setAskNote(''); setAskInput('')
+    setAskResult(null); setAskOutcome(null); clearTransientAskState(); setAskInput('')
     graphRef.current?.focusNodes([])
   }
 
   // Run whatever's in the Cypher editor directly against live Aura. Same
   // write-guard as askLive, same result shape, same node-highlighting --
   // this is the manual-query sibling of the NL "ask" flow, not a separate
-  // feature bolted on.
+  // feature bolted on. Gated on meta?.origin === 'live' (not just
+  // isLiveConfigured(), which is only "creds are present") so a fallback
+  // to sample/local data after a failed live fetch can't return real Aura
+  // elementIds that don't match any node in the graph actually on screen.
   async function runCypher() {
     const cypher = cypherInput.trim()
-    if (!cypher || asking || cypherRunning) return
-    setCypherError(''); setAskError(''); setAskNote(''); setCypherRunning(true); setAskResult(null)
+    if (!cypher || busy || meta?.origin !== 'live') return
+    clearTransientAskState(); setCypherRunning(true); setAskResult(null)
     try {
       if (WRITE_RE.test(cypher)) throw new Error('Refused: only read-only queries run from here.')
       const { summary, nodeIds } = await runReadCypher(cypher)
@@ -587,7 +601,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       setAskOutcome(null)
       graphRef.current?.focusNodes(nodeIds)
     } catch (e: any) {
-      setCypherError(String(e?.message ?? e))
+      // WRITE_RE is a fast, friendly pre-check, not the real boundary -- it
+      // can miss a write wrapped in a procedure call (e.g. a camelCase APOC
+      // name like apoc.refactor.mergeNodes). The actual protection is the
+      // server: runReadCypher opens a read-mode transaction, and Neo4j
+      // rejects any write attempted inside one, procedure or not. When that
+      // happens the driver's error is correct but not friendly -- normalize
+      // it to the same refusal message instead of showing the raw driver text.
+      const isAccessModeError = /AccessMode|ForbiddenOnReadOnly|write.{0,20}not.{0,20}allow/i.test(String(e?.code ?? '') + String(e?.message ?? ''))
+      setCypherError(isAccessModeError ? 'Refused: only read-only queries run from here.' : String(e?.message ?? e))
     } finally {
       setCypherRunning(false)
     }
@@ -688,7 +710,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   function clearSelection() { setBulkMsg(''); graphRef.current?.focusNodes([]) }
 
   function findPath() {
-    if (!graphData || selectedIds.length !== 2) return
+    if (!graphData || selectedIds.length !== 2 || busy) return
     const res = findShortestPath(graphData, selectedIds[0], selectedIds[1])
     const queryId = logAsk({ engine: 'path', question: 'Shortest path between selection', nodeIds: res.nodeIds })
     setAskResult({ ...res, q: 'Shortest path between selection', queryId })
@@ -979,7 +1001,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               onChange={e => setAskInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') runAsk() }}
             />
-            <button style={styles.askBtn} onClick={runAsk} disabled={asking || cypherRunning}>
+            <button style={styles.askBtn} onClick={runAsk} disabled={busy}>
               {asking ? '…' : '→'}
             </button>
           </div>
@@ -990,7 +1012,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               Learn Cypher ↗
             </a>
           </div>
-          {isLiveConfigured() ? (
+          {meta?.origin === 'live' ? (
             <>
               <div style={styles.cypherEditorWrap}>
                 <Suspense fallback={<div style={styles.askInfo}>Loading editor…</div>}>
@@ -1006,14 +1028,18 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               </div>
               <div style={styles.cypherRunRow}>
                 <span style={styles.cypherHint}>⌘/Ctrl+Enter to run · read-only</span>
-                <button style={styles.askBtn} onClick={runCypher} disabled={cypherRunning || asking || !cypherInput.trim()}>
+                <button style={styles.askBtn} onClick={runCypher} disabled={busy || !cypherInput.trim()}>
                   {cypherRunning ? '…' : 'Run'}
                 </button>
               </div>
               {cypherError && <div style={styles.askErr}>{cypherError}</div>}
             </>
           ) : (
-            <div style={styles.askInfo}>Connect Aura in .env to run Cypher directly — presets and English questions still work offline.</div>
+            <div style={styles.askInfo}>
+              {isLiveConfigured()
+                ? 'Live Neo4j unreachable right now — Cypher needs a live connection. Presets and English questions still work on the fallback data.'
+                : 'Connect Aura in .env to run Cypher directly — presets and English questions still work offline.'}
+            </div>
           )}
 
           <div style={styles.presetScroll}>
