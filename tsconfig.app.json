@@ -16,7 +16,14 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": false
+    "noUncheckedSideEffectImports": false,
+    // @neo4j-cypher/codemirror ships real types (package.json "types") but its
+    // "exports" map has no "types" condition on ".", so bundler-mode resolution
+    // can't find them. Point TS at the real declaration file directly -- this
+    // only affects type-checking, not Vite's own runtime resolution of the JS.
+    "paths": {
+      "@neo4j-cypher/codemirror": ["./node_modules/@neo4j-cypher/codemirror/src/codemirror.d.ts"]
+    }
   },
   "include": ["src"],
   "exclude": ["src/graph/linkedinImport.ts"]

@@ -554,7 +554,11 @@ export function liveAvailable(apiKey?: string): boolean {
   return isLiveConfigured() && Boolean(apiKey)
 }
 
-const WRITE_RE = /\b(CREATE|MERGE|SET|DELETE|REMOVE|DROP|LOAD\s+CSV|CALL\s*\{)\b/i
+// Exported so any other raw-Cypher entry point (the in-app Cypher editor)
+// applies the exact same client-side write guard, not a second copy that can
+// drift. The driver's own routing:'READ' in runReadCypher is the real
+// enforcement -- this is a fast, friendly rejection before the round trip.
+export const WRITE_RE = /\b(CREATE|MERGE|SET|DELETE|REMOVE|DROP|LOAD\s+CSV|CALL\s*\{)\b/i
 
 export async function askLive(
   question: string,

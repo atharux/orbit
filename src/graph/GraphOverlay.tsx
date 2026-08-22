@@ -10,11 +10,14 @@ import type { GraphData, GraphNode, GraphLink } from './types'
 import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
-import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink } from './neo4jSource'
-import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, verticalPresets, type AskResult, type Preset } from './ask'
+import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink, runReadCypher } from './neo4jSource'
+import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, verticalPresets, WRITE_RE, type AskResult, type Preset } from './ask'
 import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
+import CypherEditor from './CypherEditor'
+
+const CYPHER_TUTORIAL_URL = 'https://claude.ai/code/artifact/7587b27c-e615-4881-ab98-c705d636b94e'
 
 // Full-screen immersive 3D graph. The light dashboard drops away into a dark
 // space where venues/contacts float and relationships stream particles. Orbit
@@ -204,6 +207,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
   const canAskLocal = !canAskLive && localAvailable(openRouterApiKey, graphData)
+
+  // Cypher editor state — sits next to the NL "ask" box, runs read-only
+  // against the same live Aura instance.
+  const [cypherInput, setCypherInput] = useState('')
+  const [cypherRunning, setCypherRunning] = useState(false)
+  const [cypherError, setCypherError] = useState('')
 
   // FIND panel state — instant client-side search + toggle filter chips.
   const [filterText, setFilterText] = useState('')
@@ -557,6 +566,34 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   function clearAsk() {
     setAskResult(null); setAskOutcome(null); setAskError(''); setAskNote(''); setAskInput('')
     graphRef.current?.focusNodes([])
+  }
+
+  // Run whatever's in the Cypher editor directly against live Aura. Same
+  // write-guard as askLive, same result shape, same node-highlighting --
+  // this is the manual-query sibling of the NL "ask" flow, not a separate
+  // feature bolted on.
+  async function runCypher() {
+    const cypher = cypherInput.trim()
+    if (!cypher) return
+    setCypherError(''); setAskError(''); setAskNote(''); setCypherRunning(true); setAskResult(null)
+    try {
+      if (WRITE_RE.test(cypher)) throw new Error('Refused: only read-only queries run from here.')
+      const { summary, nodeIds } = await runReadCypher(cypher)
+      const queryId = logAsk({ engine: 'cypher', question: cypher, nodeIds, cypher })
+      setAskResult({ answer: summary, nodeIds, cypher, q: cypher, queryId })
+      setAskOutcome(null)
+      graphRef.current?.focusNodes(nodeIds)
+    } catch (e: any) {
+      setCypherError(String(e?.message ?? e))
+    } finally {
+      setCypherRunning(false)
+    }
+  }
+
+  // "Edit in Cypher editor" bridge from a generated (askLive) query -- lets
+  // someone start in English, then hand-tune the Cypher it produced.
+  function loadIntoCypherEditor(cypher: string) {
+    setCypherInput(cypher)
   }
 
   function rateAsk(outcome: AskOutcome) {
@@ -944,6 +981,36 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             </button>
           </div>
 
+          <div style={styles.cypherHead}>
+            <span>OR WRITE CYPHER DIRECTLY</span>
+            <a href={CYPHER_TUTORIAL_URL} target="_blank" rel="noopener noreferrer" style={styles.cypherLearnLink}>
+              Learn Cypher ↗
+            </a>
+          </div>
+          {isLiveConfigured() ? (
+            <>
+              <div style={styles.cypherEditorWrap}>
+                <CypherEditor
+                  value={cypherInput}
+                  onChange={setCypherInput}
+                  onRun={runCypher}
+                  theme={theme}
+                  placeholder="MATCH (v:Venue) WHERE v.district = 'Berlin' RETURN v"
+                  readOnly={cypherRunning}
+                />
+              </div>
+              <div style={styles.cypherRunRow}>
+                <span style={styles.cypherHint}>⌘/Ctrl+Enter to run · read-only</span>
+                <button style={styles.askBtn} onClick={runCypher} disabled={cypherRunning || !cypherInput.trim()}>
+                  {cypherRunning ? '…' : 'Run'}
+                </button>
+              </div>
+              {cypherError && <div style={styles.askErr}>{cypherError}</div>}
+            </>
+          ) : (
+            <div style={styles.askInfo}>Connect Aura in .env to run Cypher directly — presets and English questions still work offline.</div>
+          )}
+
           <div style={styles.presetScroll}>
             {presetGroups.filter(grp => grp.presets.length > 0).map(grp => (
               <div key={grp.name}>
@@ -967,7 +1034,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               <div style={styles.answerQ}>{askResult.q}</div>
               <div style={styles.answerA}>{askResult.answer}</div>
               {askResult.cypher && (
-                <pre style={styles.cypher}>{askResult.cypher}</pre>
+                <>
+                  <pre style={styles.cypher}>{askResult.cypher}</pre>
+                  <button style={styles.editCypherBtn} onClick={() => loadIntoCypherEditor(askResult.cypher!)}>
+                    Edit in Cypher editor ↑
+                  </button>
+                </>
               )}
               <div style={styles.rateRow}>
                 <span style={styles.rateLabel}>Useful?</span>
@@ -1209,6 +1281,21 @@ function makeStyles(mode: ThemeMode): Styles {
     askBtn: {
       width: 34, background: t.btn, border: `1px solid ${t.accentDim}`, borderRadius: 4,
       color: t.accent, cursor: 'pointer', fontSize: 14,
+    },
+    cypherHead: {
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14,
+      fontSize: 9, letterSpacing: '.14em', color: t.faint,
+    },
+    cypherLearnLink: { color: t.accent, fontSize: 9, letterSpacing: '.06em', textDecoration: 'none' },
+    cypherEditorWrap: {
+      marginTop: 6, border: `1px solid ${t.border}`, borderRadius: 4, overflow: 'hidden',
+      background: t.solid, minHeight: 70,
+    },
+    cypherRunRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, gap: 8 },
+    cypherHint: { fontSize: 9.5, color: t.faint, fontFamily: mono },
+    editCypherBtn: {
+      marginTop: 6, background: 'transparent', border: `1px solid ${t.accentDim}`, borderRadius: 4,
+      color: t.accent, cursor: 'pointer', fontSize: 10, padding: '4px 9px', fontFamily: mono,
     },
     filterChips: { display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     chip: {

@@ -10,7 +10,7 @@
 const LS_KEY = 'orbit-log:ask-history'
 const MAX_ENTRIES = 500
 
-export type AskEngine = 'preset' | 'live' | 'local' | 'path'
+export type AskEngine = 'preset' | 'live' | 'local' | 'path' | 'cypher'
 
 export type AskOutcome = 'positive' | 'negative'
 
