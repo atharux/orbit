@@ -184,27 +184,33 @@ function toContactRow(p: ParsedRow, verticalId: string, importedAt: string): Con
 // resolved contact identity in one pass:
 //
 //  1. If this row has no LinkedIn URL, look for an existing Contact with the
-//     same name already WORKS_AT a Venue with the same name — reuse its
-//     contact_id instead of minting a new node (best-effort de-dup; current
-//     Contact nodes carry no name today, so this mostly matches future
-//     LinkedIn-sourced contacts re-imported without a URL, which is fine).
+//     same name already WORKS_AT a same-named Venue IN THE SAME VERTICAL —
+//     reuse its contact_id instead of minting a new node (best-effort
+//     de-dup; current Contact nodes carry no name today, so this mostly
+//     matches future LinkedIn-sourced contacts re-imported without a URL,
+//     which is fine). Scoped by vertical_id so two same-named businesses in
+//     different verticals never merge into one contact.
 //  2. MERGE the Contact by the resolved id, set LinkedIn-sourced properties.
-//  3. Link to an existing Venue ONLY on an exact case-insensitive name match.
-//     Never create a Venue — OPTIONAL MATCH can't create, so this is safe by
-//     construction, not just by convention.
+//     vertical_id is safe to (re)set unconditionally here because step 1
+//     only ever matches an existing contact whose vertical already agrees.
+//  3. Link to an existing Venue ONLY on an exact case-insensitive name match
+//     within the same vertical. Never create a Venue — OPTIONAL MATCH can't
+//     create, so this is safe by construction, not just by convention.
 //  4. Tag provenance via a shared Source node, same pattern as syncToNeo4j.ts.
 const Q_IMPORT = `
 UNWIND $rows AS r
 OPTIONAL MATCH (existing:Contact)-[:WORKS_AT]->(v0:Venue)
   WHERE r.matchByName AND r.company IS NOT NULL
     AND toLower(existing.name) = toLower(r.name) AND toLower(v0.name) = toLower(r.company)
+    AND v0.vertical_id = r.verticalId AND existing.vertical_id = r.verticalId
 WITH r, coalesce(existing.contact_id, r.contactId) AS cid
 MERGE (c:Contact {contact_id: cid})
   SET c.name = r.name, c.title = r.title,
       c.linkedin_url = r.linkedinUrl, c.linkedin_industry = r.linkedinIndustry,
       c.linkedin_location = r.location, c.vertical_id = r.verticalId
 WITH c, r
-OPTIONAL MATCH (v:Venue) WHERE r.company IS NOT NULL AND toLower(v.name) = toLower(r.company)
+OPTIONAL MATCH (v:Venue)
+  WHERE r.company IS NOT NULL AND toLower(v.name) = toLower(r.company) AND v.vertical_id = r.verticalId
 FOREACH (_ IN CASE WHEN v IS NOT NULL THEN [1] ELSE [] END | MERGE (c)-[:WORKS_AT]->(v))
 WITH c, r, v
 MERGE (src:Source {name: 'linkedin-import'})

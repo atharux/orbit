@@ -1102,7 +1102,10 @@ function NeighborFan({
         const y = cy + r * Math.sin(angle)
         const onRight = x >= cx
         return (
-          <g key={nb.id} style={{ cursor: 'pointer' }} onClick={() => onJump(nb.id)}>
+          // Keyed by index, not nb.id: two different-kind edges to the same
+          // neighbor would otherwise produce duplicate ids and React could
+          // keep a stale click handler on the wrong spoke.
+          <g key={i} style={{ cursor: 'pointer' }} onClick={() => onJump(nb.id)}>
             <title>{nb.node.label}</title>
             <line x1={cx} y1={cy} x2={x} y2={y} stroke={relCol[nb.rel]} strokeWidth={1} opacity={0.55} />
             <circle cx={x} cy={y} r={5} fill={nodeCol[nb.node.kind]} stroke={bgColor} strokeWidth={1.5} />
