@@ -16,6 +16,7 @@
 
 import neo4j from 'neo4j-driver-lite'
 import { readFile } from 'node:fs/promises'
+import { BUILT_IN_VERTICALS } from '../verticals.ts'
 
 // ---------------------------------------------------------------------------
 // CSV parsing — RFC4180-ish (quoted fields, embedded commas/quotes/newlines).
@@ -189,20 +190,28 @@ function toContactRow(p: ParsedRow, verticalId: string, importedAt: string): Con
 //     de-dup; current Contact nodes carry no name today, so this mostly
 //     matches future LinkedIn-sourced contacts re-imported without a URL,
 //     which is fine). Scoped by vertical_id so two same-named businesses in
-//     different verticals never merge into one contact.
+//     different verticals never merge into one contact -- but treated as a
+//     wildcard when vertical_id is missing, since neither of this repo's
+//     other two write paths sets it on every node: scripts/load_graph.py
+//     never sets it on Venue, and syncToNeo4j.ts never sets it on Contact.
+//     A strict equality check here would silently stop matching most of
+//     the real seeded graph, not just prevent cross-vertical collisions.
 //  2. MERGE the Contact by the resolved id, set LinkedIn-sourced properties.
 //     vertical_id is safe to (re)set unconditionally here because step 1
-//     only ever matches an existing contact whose vertical already agrees.
+//     only ever matches an existing contact whose vertical already agrees
+//     (or was unset).
 //  3. Link to an existing Venue ONLY on an exact case-insensitive name match
-//     within the same vertical. Never create a Venue — OPTIONAL MATCH can't
-//     create, so this is safe by construction, not just by convention.
+//     within the same vertical (same missing-vertical_id wildcard as above).
+//     Never create a Venue — OPTIONAL MATCH can't create, so this is safe
+//     by construction, not just by convention.
 //  4. Tag provenance via a shared Source node, same pattern as syncToNeo4j.ts.
 const Q_IMPORT = `
 UNWIND $rows AS r
 OPTIONAL MATCH (existing:Contact)-[:WORKS_AT]->(v0:Venue)
   WHERE r.matchByName AND r.company IS NOT NULL
     AND toLower(existing.name) = toLower(r.name) AND toLower(v0.name) = toLower(r.company)
-    AND v0.vertical_id = r.verticalId AND existing.vertical_id = r.verticalId
+    AND (v0.vertical_id = r.verticalId OR v0.vertical_id IS NULL)
+    AND (existing.vertical_id = r.verticalId OR existing.vertical_id IS NULL)
 WITH r, coalesce(existing.contact_id, r.contactId) AS cid
 MERGE (c:Contact {contact_id: cid})
   SET c.name = r.name, c.title = r.title,
@@ -210,7 +219,8 @@ MERGE (c:Contact {contact_id: cid})
       c.linkedin_location = r.location, c.vertical_id = r.verticalId
 WITH c, r
 OPTIONAL MATCH (v:Venue)
-  WHERE r.company IS NOT NULL AND toLower(v.name) = toLower(r.company) AND v.vertical_id = r.verticalId
+  WHERE r.company IS NOT NULL AND toLower(v.name) = toLower(r.company)
+    AND (v.vertical_id = r.verticalId OR v.vertical_id IS NULL)
 FOREACH (_ IN CASE WHEN v IS NOT NULL THEN [1] ELSE [] END | MERGE (c)-[:WORKS_AT]->(v))
 WITH c, r, v
 MERGE (src:Source {name: 'linkedin-import'})
@@ -267,10 +277,21 @@ export async function importLinkedInCsv(filePath: string, verticalId: string): P
 
 // CLI entry point: `node --env-file=.env src/graph/linkedinImport.ts <csv> <verticalId>`
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [, , csvPath, verticalId] = process.argv
-  if (!csvPath || !verticalId) {
+  const [, , csvPath, rawVerticalId] = process.argv
+  if (!csvPath || !rawVerticalId) {
     console.error('usage: node --env-file=.env src/graph/linkedinImport.ts <path-to.csv> <verticalId>')
     process.exit(1)
+  }
+  // Cypher `=` is case-sensitive and verticalId flows straight into the
+  // query -- normalize so 'Trades' (what the UI displays) works the same
+  // as the actual id 'trades'. A custom vertical the user added in-app
+  // won't be in BUILT_IN_VERTICALS, so an unrecognized id only warns.
+  const verticalId = rawVerticalId.trim().toLowerCase()
+  if (!BUILT_IN_VERTICALS.some(v => v.id === verticalId)) {
+    console.warn(
+      `Warning: '${verticalId}' isn't a built-in vertical id (${BUILT_IN_VERTICALS.map(v => v.id).join(', ')}). ` +
+      `Proceeding -- fine if this is a custom vertical you added in the app, otherwise check for a typo.`,
+    )
   }
   importLinkedInCsv(csvPath, verticalId)
     .then(summary => {
