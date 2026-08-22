@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react'
 import { createCypherEditor, type EditorApi } from '@neo4j-cypher/codemirror'
 import { keymap } from '@codemirror/view'
+import { Prec } from '@codemirror/state'
 import '@neo4j-cypher/codemirror/css/cypher-codemirror.css'
 
 // Orbit's actual schema (matches ask.ts's SCHEMA_PROMPT and every MERGE this
@@ -50,9 +51,15 @@ export default function CypherEditor({
       lineNumbers: false,
       lineWrapping: true,
       history: true,
+      autofocus: false, // don't steal focus from the NL ask input / FIND box on mount
       autocompleteTriggerStrings: ['.', ':', '(', '$'],
-      postExtensions: [
-        keymap.of([{ key: 'Mod-Enter', run: () => { onRunRef.current(); return true } }]),
+      // Prec.highest, not postExtensions: the SDK's own defaultKeymap already
+      // binds Mod-Enter to insertBlankLine and runs first regardless of
+      // pre/post placement, so a plain postExtensions keymap here is silently
+      // shadowed -- confirmed by /code-review. Prec.highest guarantees this
+      // handler is tried before that one no matter where it sits in the list.
+      preExtensions: [
+        Prec.highest(keymap.of([{ key: 'Mod-Enter', run: () => { onRunRef.current(); return true } }])),
       ],
     })
     apiRef.current = api

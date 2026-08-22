@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, lazy, Suspense } from 'react'
 import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import SpriteText from 'three-spritetext'
@@ -15,7 +15,10 @@ import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortest
 import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
-import CypherEditor from './CypherEditor'
+// Lazy: CypherEditor pulls in CodeMirror + the ANTLR-based Cypher grammar,
+// and only ever renders when isLiveConfigured() -- code-split so that cost
+// isn't paid by everyone loading the graph, only by users with Aura wired up.
+const CypherEditor = lazy(() => import('./CypherEditor'))
 
 const CYPHER_TUTORIAL_URL = 'https://claude.ai/code/artifact/7587b27c-e615-4881-ab98-c705d636b94e'
 
@@ -536,7 +539,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
   async function runAsk() {
     const q = askInput.trim()
-    if (!q || !graphData) return
+    if (!q || !graphData || asking || cypherRunning) return
     setAskError(''); setAskNote(''); setAsking(true); setAskResult(null)
     try {
       if (canAskLive) {
@@ -574,7 +577,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // feature bolted on.
   async function runCypher() {
     const cypher = cypherInput.trim()
-    if (!cypher) return
+    if (!cypher || asking || cypherRunning) return
     setCypherError(''); setAskError(''); setAskNote(''); setCypherRunning(true); setAskResult(null)
     try {
       if (WRITE_RE.test(cypher)) throw new Error('Refused: only read-only queries run from here.')
@@ -976,7 +979,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               onChange={e => setAskInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') runAsk() }}
             />
-            <button style={styles.askBtn} onClick={runAsk} disabled={asking}>
+            <button style={styles.askBtn} onClick={runAsk} disabled={asking || cypherRunning}>
               {asking ? '…' : '→'}
             </button>
           </div>
@@ -990,18 +993,20 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           {isLiveConfigured() ? (
             <>
               <div style={styles.cypherEditorWrap}>
-                <CypherEditor
-                  value={cypherInput}
-                  onChange={setCypherInput}
-                  onRun={runCypher}
-                  theme={theme}
-                  placeholder="MATCH (v:Venue) WHERE v.district = 'Berlin' RETURN v"
-                  readOnly={cypherRunning}
-                />
+                <Suspense fallback={<div style={styles.askInfo}>Loading editor…</div>}>
+                  <CypherEditor
+                    value={cypherInput}
+                    onChange={setCypherInput}
+                    onRun={runCypher}
+                    theme={theme}
+                    placeholder="MATCH (v:Venue) WHERE v.district = 'Berlin' RETURN v"
+                    readOnly={cypherRunning}
+                  />
+                </Suspense>
               </div>
               <div style={styles.cypherRunRow}>
                 <span style={styles.cypherHint}>⌘/Ctrl+Enter to run · read-only</span>
-                <button style={styles.askBtn} onClick={runCypher} disabled={cypherRunning || !cypherInput.trim()}>
+                <button style={styles.askBtn} onClick={runCypher} disabled={cypherRunning || asking || !cypherInput.trim()}>
                   {cypherRunning ? '…' : 'Run'}
                 </button>
               </div>
