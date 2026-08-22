@@ -191,27 +191,31 @@ function toContactRow(p: ParsedRow, verticalId: string, importedAt: string): Con
 //     matches future LinkedIn-sourced contacts re-imported without a URL,
 //     which is fine). Scoped by vertical_id so two same-named businesses in
 //     different verticals never merge into one contact -- but treated as a
-//     wildcard when vertical_id is missing, since neither of this repo's
-//     other two write paths sets it on every node: scripts/load_graph.py
-//     never sets it on Venue, and syncToNeo4j.ts never sets it on Contact.
-//     A strict equality check here would silently stop matching most of
-//     the real seeded graph, not just prevent cross-vertical collisions.
+//     wildcard when vertical_id is missing OR empty, since neither of this
+//     repo's other two write paths sets a real value on every node:
+//     scripts/load_graph.py never sets vertical_id on Venue at all (so it's
+//     absent/null there), and syncToNeo4j.ts sets it to '' for any lead
+//     with no vertical tag (see `l.vertical_id || ''`) rather than leaving
+//     it unset. A strict equality check -- or a null-only wildcard -- would
+//     silently stop matching most of the real seeded graph. Comparison is
+//     also case-insensitive, since a value written by an earlier, differently
+//     -cased run of this same script must still count as a match.
 //  2. MERGE the Contact by the resolved id, set LinkedIn-sourced properties.
 //     vertical_id is safe to (re)set unconditionally here because step 1
 //     only ever matches an existing contact whose vertical already agrees
 //     (or was unset).
 //  3. Link to an existing Venue ONLY on an exact case-insensitive name match
-//     within the same vertical (same missing-vertical_id wildcard as above).
-//     Never create a Venue — OPTIONAL MATCH can't create, so this is safe
-//     by construction, not just by convention.
+//     within the same vertical (same missing-or-empty vertical_id wildcard
+//     as above). Never create a Venue — OPTIONAL MATCH can't create, so
+//     this is safe by construction, not just by convention.
 //  4. Tag provenance via a shared Source node, same pattern as syncToNeo4j.ts.
 const Q_IMPORT = `
 UNWIND $rows AS r
 OPTIONAL MATCH (existing:Contact)-[:WORKS_AT]->(v0:Venue)
   WHERE r.matchByName AND r.company IS NOT NULL
     AND toLower(existing.name) = toLower(r.name) AND toLower(v0.name) = toLower(r.company)
-    AND (v0.vertical_id = r.verticalId OR v0.vertical_id IS NULL)
-    AND (existing.vertical_id = r.verticalId OR existing.vertical_id IS NULL)
+    AND (v0.vertical_id IS NULL OR v0.vertical_id = '' OR toLower(v0.vertical_id) = toLower(r.verticalId))
+    AND (existing.vertical_id IS NULL OR existing.vertical_id = '' OR toLower(existing.vertical_id) = toLower(r.verticalId))
 WITH r, coalesce(existing.contact_id, r.contactId) AS cid
 MERGE (c:Contact {contact_id: cid})
   SET c.name = r.name, c.title = r.title,
@@ -220,7 +224,7 @@ MERGE (c:Contact {contact_id: cid})
 WITH c, r
 OPTIONAL MATCH (v:Venue)
   WHERE r.company IS NOT NULL AND toLower(v.name) = toLower(r.company)
-    AND (v.vertical_id = r.verticalId OR v.vertical_id IS NULL)
+    AND (v.vertical_id IS NULL OR v.vertical_id = '' OR toLower(v.vertical_id) = toLower(r.verticalId))
 FOREACH (_ IN CASE WHEN v IS NOT NULL THEN [1] ELSE [] END | MERGE (c)-[:WORKS_AT]->(v))
 WITH c, r, v
 MERGE (src:Source {name: 'linkedin-import'})
