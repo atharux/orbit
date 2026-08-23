@@ -15,6 +15,7 @@ import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortest
 import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
+import { openExternal } from '../utils/openExternal'
 // Lazy: CypherEditor pulls in CodeMirror + the ANTLR-based Cypher grammar,
 // and only ever renders when meta?.origin === 'live' -- code-split so that
 // cost isn't paid by everyone loading the graph, only once a live Aura
@@ -851,16 +852,16 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
                 <div style={styles.actions}>
                   <div style={styles.actionLinks}>
                     {activeLead.website && (
-                      <a style={styles.actionBtn} href={hrefFor(activeLead.website)} target="_blank" rel="noopener noreferrer">↗ Website</a>
+                      <a style={styles.actionBtn} href={hrefFor(activeLead.website)} target="_blank" rel="noopener noreferrer" onClick={e => { e.preventDefault(); openExternal(hrefFor(activeLead.website!)) }}>↗ Website</a>
                     )}
                     {activeLead.email && (
-                      <a style={styles.actionBtn} href={`mailto:${activeLead.email}`}>✉ Email</a>
+                      <a style={styles.actionBtn} href={`mailto:${activeLead.email}`} onClick={e => { e.preventDefault(); openExternal(`mailto:${activeLead.email}`) }}>✉ Email</a>
                     )}
                     {activeLead.phone && (
-                      <a style={styles.actionBtn} href={`tel:${activeLead.phone}`}>☎ Call</a>
+                      <a style={styles.actionBtn} href={`tel:${activeLead.phone}`} onClick={e => { e.preventDefault(); openExternal(`tel:${activeLead.phone}`) }}>☎ Call</a>
                     )}
                     {activeLead.instagram && (
-                      <a style={styles.actionBtn} href={instagramHref(activeLead.instagram)} target="_blank" rel="noopener noreferrer">◎ Instagram</a>
+                      <a style={styles.actionBtn} href={instagramHref(activeLead.instagram)} target="_blank" rel="noopener noreferrer" onClick={e => { e.preventDefault(); openExternal(instagramHref(activeLead.instagram!)) }}>◎ Instagram</a>
                     )}
                   </div>
                   {onLeadStatusChange && (
@@ -1008,7 +1009,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
           <div style={styles.cypherHead}>
             <span>OR WRITE CYPHER DIRECTLY</span>
-            <a href={CYPHER_TUTORIAL_URL} target="_blank" rel="noopener noreferrer" style={styles.cypherLearnLink}>
+            <a href={CYPHER_TUTORIAL_URL} target="_blank" rel="noopener noreferrer" style={styles.cypherLearnLink} onClick={e => { e.preventDefault(); openExternal(CYPHER_TUTORIAL_URL) }}>
               Learn Cypher ↗
             </a>
           </div>
@@ -1112,7 +1113,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               </div>
             ))}
             {browserUrl && (
-              <a style={styles.browserBtn} href={browserUrl} target="_blank" rel="noopener noreferrer" title="Open this Aura instance in Neo4j Browser">
+              <a style={styles.browserBtn} href={browserUrl} target="_blank" rel="noopener noreferrer" title="Open this Aura instance in Neo4j Browser" onClick={e => { e.preventDefault(); openExternal(browserUrl) }}>
                 Open in Neo4j Browser ↗
               </a>
             )}

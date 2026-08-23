@@ -97,6 +97,12 @@ fn backup_remove(dir: String, name: String) -> Result<(), String> {
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    // External links (venue website, Instagram, mailto, Neo4j Browser, the
+    // Cypher tutorial) don't open anything on their own inside a Tauri
+    // webview -- a plain <a target="_blank"> click is a no-op without this.
+    // Frontend calls openUrl() from @tauri-apps/plugin-opener; see
+    // src/utils/openExternal.ts.
+    .plugin(tauri_plugin_opener::init())
     // Lets the scraper client issue requests from Rust instead of the webview.
     // The shared worker only sends CORS headers for https://venues.atharux.com,
     // so a direct fetch from a tauri:// origin is blocked by WKWebView — see

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { Lead, Vertical, OutreachStatus } from '../types'
 import { STATUSES, STATUS_LABEL, STATUS_COLOR } from '../types'
+import { openExternal } from '../utils/openExternal'
 
 // Normalize a stored website into an openable URL (leads often omit the scheme).
 function hrefFor(url: string): string {
@@ -54,7 +55,11 @@ export function LeadDetail({ lead, vertical, editTrigger, onUpdate, onDelete, on
           <div className="detail-value">
             {value
               ? (type === 'url' || type === 'email'
-                ? <a href={type === 'email' ? `mailto:${value}` : hrefFor(value)} target="_blank" rel="noreferrer">{value}</a>
+                ? <a
+                    href={type === 'email' ? `mailto:${value}` : hrefFor(value)}
+                    target="_blank" rel="noreferrer"
+                    onClick={e => { e.preventDefault(); openExternal(type === 'email' ? `mailto:${value}` : hrefFor(value)) }}
+                  >{value}</a>
                 : value)
               : <span className="text-faint mono" style={{ fontSize: 11 }}>—</span>
             }
