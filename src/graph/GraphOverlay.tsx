@@ -152,6 +152,27 @@ function neighborsOf(g: GraphData, id: string): Neighbor[] {
   return out
 }
 
+interface PopoutChip { label: string; value: string; onClick?: () => void }
+
+// The context-chip popout's content: real GraphNode fields only, nothing
+// invented. Priority order, capped at 4 so a data-rich node doesn't ring
+// itself with more chips than the (label-avoiding, see the render site)
+// arc comfortably holds. No "connections" chip -- the selected-node card
+// right next to it already says "N connections," so it was pure
+// duplication, not new information. Everything else only appears when
+// that field actually has a value, same defensive pattern the action bar
+// a few hundred lines down already uses.
+function buildPopoutChips(node: GraphNode): PopoutChip[] {
+  const candidates: (PopoutChip | null)[] = [
+    node.district ? { label: 'District', value: node.district } : null,
+    node.verified ? { label: 'Verified', value: '✓' } : null,
+    node.website ? { label: 'Website', value: '↗ open', onClick: () => openExternal(hrefFor(node.website!)) } : null,
+    node.apps?.length ? { label: 'Apps', value: String(node.apps.length) } : null,
+    node.lastShipped ? { label: 'Shipped', value: node.lastShipped } : null,
+  ]
+  return candidates.filter((c): c is PopoutChip => c !== null).slice(0, 4)
+}
+
 // Smart find: multi-token AND match over a node's label/sub/district, plus
 // kind, vertical and verified constraints. Returns the ids of matching nodes.
 function filterNodeIds(
@@ -198,6 +219,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [liveWarning, setLiveWarning] = useState<string | null>(null)
   const [selected, setSelected] = useState<GraphNode | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([]) // multi-selection for bulk actions
+
+  // Context-chip popout: appears once the post-click camera zoom lands, then
+  // tracks the node's screen position every frame as the camera orbits.
+  // Position updates are imperative (a ref, not state) -- going through
+  // React state at 60fps would mean a full re-render every frame for
+  // something that's really just "move this div."
+  const [popout, setPopout] = useState<{ nodeId: string; kind: GraphNode['kind']; chips: PopoutChip[] } | null>(null)
+  const popoutRef = useRef<HTMLDivElement>(null)
+  const popoutNodeRef = useRef<any>(null) // the live 3d-force-graph node object (has .x/.y/.z), or null when hidden
   const [bulkMsg, setBulkMsg] = useState('')
   const [enriching, setEnriching] = useState(false)
   const [errMsg, setErrMsg] = useState('')
@@ -262,6 +292,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       const highlightLinks = new Set<GraphLink>()
       const multiSel = new Set<string>() // shift/⌘-click or preset-driven multi-selection
       let focused: GraphNode | null = null
+      let popoutTimer: number | null = null
+      function clearPopout() {
+        if (popoutTimer !== null) { window.clearTimeout(popoutTimer); popoutTimer = null }
+        popoutNodeRef.current = null
+        setPopout(null)
+      }
 
       const nodeIsHot = (n: any) => highlightNodes.size === 0 || highlightNodes.has(n.id)
       // Live canvas theme — read fresh on every accessor call so applyTheme() takes effect.
@@ -423,7 +459,23 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         // Fly the camera to the node.
         const dist = 120
         const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1)
-        Graph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, 1400)
+        const flightMs = 1400
+        Graph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, flightMs)
+
+        // Context chips pop out once the zoom lands, not before -- and only
+        // for whichever node is still selected when the timer fires, so a
+        // fast reselect mid-flight can't leave a stale popout pointing at
+        // the wrong node. cameraPosition() has no completion callback (see
+        // its .d.ts), so a timer matching its own transition duration is
+        // the only option here.
+        clearPopout()
+        popoutTimer = window.setTimeout(() => {
+          popoutTimer = null
+          const chips = buildPopoutChips(node)
+          if (chips.length === 0) return
+          popoutNodeRef.current = node
+          setPopout({ nodeId: node.id, kind: node.kind, chips })
+        }, flightMs + 60)
       }
 
       // Reflect the multi-selection into the highlight + sync to React.
@@ -442,6 +494,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       function toggleSelect(id: string) {
         multiSel.has(id) ? multiSel.delete(id) : multiSel.add(id)
         setSelected(null)
+        clearPopout()
         applySelectionHighlight()
       }
 
@@ -460,7 +513,29 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         refreshHighlight()
         setSelected(null)
         setSelectedIds([])
+        clearPopout()
       })
+
+      // Keep the popout glued to its node's on-screen position every frame,
+      // so it tracks correctly through camera orbit after landing -- an
+      // imperative style mutation, not React state, since this runs at
+      // render-loop rate. NOT Graph.onEngineTick(): that fires only while
+      // the force-layout simulation is actively cooling, which has long
+      // settled by the time a user clicks a node minutes later -- confirmed
+      // by testing, the container's transform was simply never set. Three's
+      // own render loop runs continuously regardless (that's what draws
+      // camera orbit at all), but 3d-force-graph doesn't expose a hook into
+      // it, so this is a small self-driven rAF loop instead.
+      function tickPopoutPosition() {
+        if (disposed) return
+        const n = popoutNodeRef.current
+        if (n && popoutRef.current) {
+          const { x, y } = Graph.graph2ScreenCoords(n.x, n.y, n.z)
+          popoutRef.current.style.transform = `translate(${x}px, ${y}px)`
+        }
+        requestAnimationFrame(tickPopoutPosition)
+      }
+      requestAnimationFrame(tickPopoutPosition)
 
       // Imperative handle for the ask panel: light up an arbitrary node set.
       function focusNodes(ids: string[]) {
@@ -468,6 +543,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         highlightLinks.clear()
         multiSel.clear()
         setSelected(null)
+        clearPopout()
         if (ids.length === 0) { controls.autoRotate = true; refreshHighlight(); setSelectedIds([]); return }
         ids.forEach(id => { highlightNodes.add(id); multiSel.add(id) })
         for (const l of (Graph.graphData().links as any[])) {
@@ -507,7 +583,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       // fit once the layout settles
       setTimeout(() => Graph.zoomToFit(1200, 60), 700)
 
-      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer }
+      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer, clearPopout }
       void focused
     }
 
@@ -517,6 +593,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       if (g) {
         window.removeEventListener('resize', g.onResize)
         clearInterval(g.impulseTimer)
+        g.clearPopout() // cancel any pending "chips pop in" timer -- setPopout after unmount would be a no-op warning otherwise
         g.Graph._destructor?.()
       }
       graphRef.current = null
@@ -764,6 +841,47 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   return (
     <div style={styles.overlay}>
       <div ref={containerRef} style={styles.canvas} />
+
+      {/* Context chips: pop out from a node's on-screen position once the
+          post-click camera zoom lands (scheduled in selectNode); tracked
+          every frame by the tickPopoutPosition rAF loop started in initGraph. */}
+      {popout && (
+        <div ref={popoutRef} style={styles.popoutContainer}>
+          {popout.chips.map((chip, i) => {
+            // Arc centered straight down, not a full ring: every node's own
+            // label renders directly above it (see nodeThreeObject's
+            // t.position.set), so a chip placed "at top" sits right on top
+            // of the node's own name -- confirmed on screen, not theoretical.
+            // ~240° of arc leaves a ~120° gap centered on "up" for the label.
+            const n = popout.chips.length
+            const arcCenter = Math.PI / 2 // straight down
+            const arcSpan = Math.PI * 1.33
+            const angle = n === 1 ? arcCenter : arcCenter - arcSpan / 2 + (arcSpan * i) / (n - 1)
+            const radius = 108
+            const tx = Math.round(Math.cos(angle) * radius)
+            const ty = Math.round(Math.sin(angle) * radius)
+            return (
+              <div
+                key={i}
+                style={{
+                  ...styles.popoutChip,
+                  borderColor: nodeCol[popout.kind] + '55',
+                  animation: 'popoutChip .5s cubic-bezier(.2,.9,.3,1.25) forwards',
+                  animationDelay: `${i * 90}ms`,
+                  cursor: chip.onClick ? 'pointer' : 'default',
+                  ['--tx' as any]: `${tx}px`,
+                  ['--ty' as any]: `${ty}px`,
+                }}
+                onClick={chip.onClick}
+              >
+                <span style={{ ...styles.popoutChipDot, background: nodeCol[popout.kind] }} />
+                <span style={styles.popoutChipLabel}>{chip.label}</span>
+                <span style={styles.popoutChipValue}>{chip.value}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Top HUD */}
       <div style={styles.hudTop}>
@@ -1262,6 +1380,20 @@ function makeStyles(mode: ThemeMode): Styles {
   return {
     overlay: { position: 'fixed', inset: 0, zIndex: 1000, background: t.overlayBg, overflow: 'hidden' },
     canvas: { position: 'absolute', inset: 0 },
+    popoutContainer: {
+      position: 'absolute', left: 0, top: 0, width: 0, height: 0,
+      zIndex: 4, pointerEvents: 'none', willChange: 'transform',
+    },
+    popoutChip: {
+      position: 'absolute', left: 0, top: 0, pointerEvents: 'auto',
+      display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+      background: t.card, border: '1px solid', borderRadius: 6,
+      padding: '6px 10px', fontFamily: mono, fontSize: 11, color: t.text2,
+      boxShadow: mode === 'dark' ? '0 6px 20px #000a' : '0 4px 14px rgba(32,30,24,.16)',
+    },
+    popoutChipDot: { width: 6, height: 6, borderRadius: '50%', flexShrink: 0 },
+    popoutChipLabel: { fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', color: t.faint },
+    popoutChipValue: { color: t.text, fontWeight: 600 },
     hudTop: {
       position: 'absolute', top: 0, left: 0, right: 0, height: 52, display: 'flex', alignItems: 'center',
       gap: 14, padding: '0 20px', zIndex: 2, background: t.topGrad, color: t.text, fontFamily: mono,

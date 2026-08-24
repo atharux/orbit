@@ -781,6 +781,15 @@ a { color: inherit; text-decoration: none }
   50% { opacity: .3 }
 }
 
+/* Graph node-click context chips (GraphOverlay.tsx) -- each chip animates
+   outward from the node's screen position by its own --tx/--ty custom
+   properties, set inline per chip since the count/angle is computed live. */
+@keyframes popoutChip {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(.35) }
+  55%  { opacity: 1 }
+  100% { opacity: 1; transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(1) }
+}
+
 /* Preset item in AddVerticalModal */
 .preset-item:hover { background: var(--surface-2) !important }
 
