@@ -228,7 +228,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // Position updates are imperative (a ref, not state) -- going through
   // React state at 60fps would mean a full re-render every frame for
   // something that's really just "move this div."
-  const [popout, setPopout] = useState<{ nodeId: string; kind: GraphNode['kind']; chips: PopoutChip[] } | null>(null)
+  const [popout, setPopout] = useState<{ kind: GraphNode['kind']; chips: PopoutChip[] } | null>(null)
   const popoutRef = useRef<HTMLDivElement>(null)
   const popoutNodeRef = useRef<any>(null) // the live 3d-force-graph node object (has .x/.y/.z), or null when hidden
   const [bulkMsg, setBulkMsg] = useState('')
@@ -486,7 +486,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           const chips = buildPopoutChips(node)
           if (chips.length === 0) return
           popoutNodeRef.current = node
-          setPopout({ nodeId: node.id, kind: node.kind, chips })
+          setPopout({ kind: node.kind, chips })
           requestAnimationFrame(tickPopoutPosition) // (re)start tracking -- see its own definition for why it's not started unconditionally
         }, flightMs + 60)
       }
