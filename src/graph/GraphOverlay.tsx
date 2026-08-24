@@ -155,13 +155,12 @@ function neighborsOf(g: GraphData, id: string): Neighbor[] {
 interface PopoutChip { label: string; value: string; onClick?: () => void }
 
 // The context-chip popout's content: real GraphNode fields only, nothing
-// invented. Priority order, capped at 4 so a data-rich node doesn't ring
-// itself with more chips than the (label-avoiding, see the render site)
-// arc comfortably holds. No "connections" chip -- the selected-node card
-// right next to it already says "N connections," so it was pure
-// duplication, not new information. Everything else only appears when
-// that field actually has a value, same defensive pattern the action bar
-// a few hundred lines down already uses.
+// invented. At most 5 candidates, one per field -- the label-avoiding arc
+// at the render site sizes itself to whatever count actually shows. No
+// "connections" chip -- the selected-node card right next to it already
+// says "N connections," so it was pure duplication, not new information.
+// Everything else only appears when that field actually has a value, same
+// defensive pattern the action bar a few hundred lines down already uses.
 function buildPopoutChips(node: GraphNode): PopoutChip[] {
   const candidates: (PopoutChip | null)[] = [
     node.district ? { label: 'District', value: node.district } : null,
@@ -170,7 +169,11 @@ function buildPopoutChips(node: GraphNode): PopoutChip[] {
     node.apps?.length ? { label: 'Apps', value: String(node.apps.length) } : null,
     node.lastShipped ? { label: 'Shipped', value: node.lastShipped } : null,
   ]
-  return candidates.filter((c): c is PopoutChip => c !== null).slice(0, 4)
+  // No slice: 5 candidates above is already the ceiling, so capping at 4
+  // made the lowest-priority one (Shipped) structurally unreachable on any
+  // node with all 5 fields set -- confirmed reachable on live Neo4j data,
+  // where fields aren't cleanly separated by kind the way local sample data is.
+  return candidates.filter((c): c is PopoutChip => c !== null)
 }
 
 // Smart find: multi-token AND match over a node's label/sub/district, plus
@@ -438,6 +441,11 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       }
 
       function selectNode(node: any) {
+        // Re-clicking the node that's already focused shouldn't re-fly the
+        // camera or reset an already-visible popout -- nothing about the
+        // selection actually changed, so the popout would otherwise vanish
+        // and not reappear for another ~1.5s for no reason.
+        if (focused?.id === node.id) return
         focused = node
         multiSel.clear()
         setSelectedIds([])
@@ -475,6 +483,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           if (chips.length === 0) return
           popoutNodeRef.current = node
           setPopout({ nodeId: node.id, kind: node.kind, chips })
+          requestAnimationFrame(tickPopoutPosition) // (re)start tracking -- see its own definition for why it's not started unconditionally
         }, flightMs + 60)
       }
 
@@ -526,16 +535,20 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       // own render loop runs continuously regardless (that's what draws
       // camera orbit at all), but 3d-force-graph doesn't expose a hook into
       // it, so this is a small self-driven rAF loop instead.
+      //
+      // Self-terminating, not started unconditionally at graph setup: it
+      // stops rescheduling itself the moment there's no popout to track, and
+      // gets kicked off again (see the setTimeout above) only when one
+      // actually appears -- a permanent per-frame callback for a feature
+      // that's idle most of a session isn't worth the standing cost.
       function tickPopoutPosition() {
         if (disposed) return
         const n = popoutNodeRef.current
-        if (n && popoutRef.current) {
-          const { x, y } = Graph.graph2ScreenCoords(n.x, n.y, n.z)
-          popoutRef.current.style.transform = `translate(${x}px, ${y}px)`
-        }
+        if (!n || !popoutRef.current) return
+        const { x, y } = Graph.graph2ScreenCoords(n.x || 0, n.y || 0, n.z || 0)
+        popoutRef.current.style.transform = `translate(${x}px, ${y}px)`
         requestAnimationFrame(tickPopoutPosition)
       }
-      requestAnimationFrame(tickPopoutPosition)
 
       // Imperative handle for the ask panel: light up an arbitrary node set.
       function focusNodes(ids: string[]) {
@@ -866,7 +879,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
                 style={{
                   ...styles.popoutChip,
                   borderColor: nodeCol[popout.kind] + '55',
-                  animation: 'popoutChip .5s cubic-bezier(.2,.9,.3,1.25) forwards',
+                  // 'both', not 'forwards': with a staggered delay, 'forwards'
+                  // leaves a chip in its default (fully opaque, untransformed,
+                  // pinned right on the node) state until its delay elapses --
+                  // a visible flash on every multi-chip selection. 'both' also
+                  // applies the 0% keyframe during the delay.
+                  animation: 'popoutChip .5s cubic-bezier(.2,.9,.3,1.25) both',
                   animationDelay: `${i * 90}ms`,
                   cursor: chip.onClick ? 'pointer' : 'default',
                   ['--tx' as any]: `${tx}px`,
