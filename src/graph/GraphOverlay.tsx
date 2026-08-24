@@ -441,11 +441,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       }
 
       function selectNode(node: any) {
-        // Re-clicking the node that's already focused shouldn't re-fly the
-        // camera or reset an already-visible popout -- nothing about the
-        // selection actually changed, so the popout would otherwise vanish
-        // and not reappear for another ~1.5s for no reason.
-        if (focused?.id === node.id) return
+        // NOTE: previously short-circuited here when `focused?.id ===
+        // node.id`, to avoid re-flying the camera on a same-node re-click.
+        // Reverted -- `focused` isn't reset by the ~10 other paths that
+        // clear selection/highlight state (focusNodes, toggleSelect, every
+        // preset/FIND/ask-result call site), so it goes stale independently
+        // of `selected`/highlightNodes, and the guard made the node
+        // permanently unclickable after any of those ran. The 1.5s cosmetic
+        // re-trigger delay on a genuine same-node re-click is the smaller
+        // problem.
         focused = node
         multiSel.clear()
         setSelectedIds([])
@@ -544,10 +548,20 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       function tickPopoutPosition() {
         if (disposed) return
         const n = popoutNodeRef.current
-        if (!n || !popoutRef.current) return
-        const { x, y } = Graph.graph2ScreenCoords(n.x || 0, n.y || 0, n.z || 0)
-        popoutRef.current.style.transform = `translate(${x}px, ${y}px)`
-        requestAnimationFrame(tickPopoutPosition)
+        // Only stop rescheduling when there's genuinely nothing to track.
+        // A React setState from a raw setTimeout (not an event handler)
+        // isn't guaranteed to commit before this fires, so the very first
+        // tick can land before <div ref={popoutRef}> exists yet -- if that
+        // also stopped the loop, the chips would mount but never get a
+        // transform, stuck at the container's default (0,0) forever. Keep
+        // retrying every frame until the ref shows up.
+        if (n) {
+          if (popoutRef.current) {
+            const { x, y } = Graph.graph2ScreenCoords(n.x || 0, n.y || 0, n.z || 0)
+            popoutRef.current.style.transform = `translate(${x}px, ${y}px)`
+          }
+          requestAnimationFrame(tickPopoutPosition)
+        }
       }
 
       // Imperative handle for the ask panel: light up an arbitrary node set.
