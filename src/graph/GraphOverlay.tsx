@@ -206,7 +206,7 @@ function filterNodeIds(
     .map(n => n.id)
 }
 
-export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel, onLeadStatusChange, onOpenLead, onBulkEnrich }: {
+export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel, onLeadStatusChange, onOpenLead, onBulkEnrich, onOpenCypherTutorial }: {
   leads: Lead[]
   onClose: () => void
   openRouterApiKey?: string
@@ -219,6 +219,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   onOpenLead?: (leadId: string) => void
   // Bulk-enrich the selected leads (fills blank email/phone/website via scraper).
   onBulkEnrich?: (leadIds: string[]) => Promise<{ updated: number; failed: number }>
+  // "Learn Cypher" now opens the in-app tutorial (Pitch page's Cypher Tutorial
+  // tab) instead of the external claude.ai artifact. Optional, falling back
+  // to the external link only if a caller doesn't wire this up.
+  onOpenCypherTutorial?: () => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<any>(null)
@@ -1221,7 +1225,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
           <div style={styles.cypherHead}>
             <span>OR WRITE CYPHER DIRECTLY</span>
-            <a href={CYPHER_TUTORIAL_URL} target="_blank" rel="noopener noreferrer" style={styles.cypherLearnLink} onClick={e => { e.preventDefault(); openExternal(CYPHER_TUTORIAL_URL) }}>
+            <a href={CYPHER_TUTORIAL_URL} target="_blank" rel="noopener noreferrer" style={styles.cypherLearnLink} onClick={e => { e.preventDefault(); onOpenCypherTutorial ? onOpenCypherTutorial() : openExternal(CYPHER_TUTORIAL_URL) }}>
               Learn Cypher ↗
             </a>
           </div>

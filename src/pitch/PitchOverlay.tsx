@@ -9,15 +9,16 @@ import { useState } from 'react'
 // X-Frame-Options/CORS concerns the way embedding the external claude.ai
 // artifact URLs directly would have.
 
-type Tab = 'pitch' | 'cypher'
+export type PitchTab = 'pitch' | 'cypher'
+type Tab = PitchTab
 
 const TABS: { id: Tab; label: string; src: string; title: string }[] = [
   { id: 'pitch', label: 'Pitch', src: '/pitch/pitch.html', title: 'Orbit pitch slide' },
   { id: 'cypher', label: 'Cypher Tutorial', src: '/pitch/cypher-tutorial.html', title: 'Cypher, By Your Own Graph' },
 ]
 
-export function PitchOverlay({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('pitch')
+export function PitchOverlay({ onClose, initialTab = 'pitch' }: { onClose: () => void; initialTab?: PitchTab }) {
+  const [tab, setTab] = useState<Tab>(initialTab)
   const active = TABS.find(t => t.id === tab)!
 
   return (
