@@ -13,6 +13,7 @@ import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink, runReadCypher } from './neo4jSource'
 import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, verticalPresets, WRITE_RE, type AskResult, type Preset } from './ask'
 import { logAsk, logOutcome, type AskOutcome } from './askLog'
+import { loadSmartPresets, generateSmartPresets, type SmartPreset } from './smartPresets'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
 import { openExternal } from '../utils/openExternal'
@@ -252,6 +253,14 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
   const canAskLocal = !canAskLive && localAvailable(openRouterApiKey, graphData)
+
+  // Auto-generated, per-vertical smart question catalog (smartPresets.ts).
+  // smartGenAttempted guards against re-firing generation for the same
+  // vertical on every re-render within this mount -- a ref, not state,
+  // since it's bookkeeping that must never itself trigger a re-render.
+  const [smartPresetsByVertical, setSmartPresetsByVertical] = useState<Record<string, SmartPreset[]>>({})
+  const [smartGenerating, setSmartGenerating] = useState<Set<string>>(new Set())
+  const smartGenAttempted = useRef<Set<string>>(new Set())
 
   // Cypher editor state — sits next to the NL "ask" box, runs read-only
   // against the same live Aura instance.
@@ -652,6 +661,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
   function runPreset(p: Preset) {
     if (!graphData || busy) return
+    // A smart preset (smartPresets.ts) has no client-side filter logic to
+    // run -- it's a question grounded in a live schema profile, meant to
+    // flow through the same live NL-ask pipeline a typed question would.
+    if (p.isSmart) { askQuestion(p.q); return }
     clearTransientAskState()
     const res = p.run(graphData)
     const queryId = logAsk({ engine: 'preset', question: p.q, nodeIds: res.nodeIds })
@@ -660,8 +673,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     graphRef.current?.focusNodes(res.nodeIds)
   }
 
-  async function runAsk() {
-    const q = askInput.trim()
+  async function askQuestion(q: string) {
     if (!q || !graphData || busy) return
     clearTransientAskState(); setAsking(true); setAskResult(null)
     try {
@@ -687,6 +699,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     } finally {
       setAsking(false)
     }
+  }
+
+  function runAsk() {
+    return askQuestion(askInput.trim())
   }
 
   function clearAsk() {
@@ -847,12 +863,51 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     : []
   const hasVerifiedNodes = graphData ? graphData.nodes.some(n => n.verified) : false
 
+  // Study each live vertical's real shape and grow its question catalog
+  // automatically -- once per vertical id (smartGenAttempted), the first
+  // time its data is seen live with an OpenRouter key available. Runs for
+  // every vertical uniformly (not hand-wired per vertical like
+  // verticalPresets() in ask.ts), so a brand-new vertical gets a catalog
+  // with zero code changes the next time its data lands in Aura.
+  useEffect(() => {
+    if (meta?.origin !== 'live' || !graphData || !openRouterApiKey) return
+    for (const v of presentVerticals) {
+      if (smartGenAttempted.current.has(v.id)) continue
+      smartGenAttempted.current.add(v.id)
+      const cached = loadSmartPresets(v.id)
+      if (cached.length) {
+        setSmartPresetsByVertical(prev => ({ ...prev, [v.id]: cached }))
+        continue
+      }
+      setSmartGenerating(prev => new Set(prev).add(v.id))
+      generateSmartPresets(v, openRouterApiKey, openRouterModel)
+        .then(presets => setSmartPresetsByVertical(prev => ({ ...prev, [v.id]: presets })))
+        .catch(err => console.warn(`Smart preset generation failed for ${v.id}`, err))
+        .finally(() => setSmartGenerating(prev => { const next = new Set(prev); next.delete(v.id); return next }))
+    }
+    // presentVerticals is recomputed every render (new array identity), so it
+    // can't be a dependency without refiring every render -- graphData/meta
+    // changing is what actually means "there may be a new vertical to study".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphData, meta?.origin, openRouterApiKey, openRouterModel])
+
   // Ask-panel catalogue: generic presets grouped by category, plus one group
-  // per vertical actually present in this graph (built-in or custom).
+  // per vertical actually present in this graph (built-in, custom, or
+  // auto-generated from a live schema profile — smartPresets.ts).
   const PRESET_CATEGORY_ORDER = ['Coverage', 'Verification', 'Outreach', 'Structure']
-  const presetGroups: { name: string; presets: Preset[] }[] = [
+  const presetGroups: { name: string; verticalId?: string; presets: Preset[] }[] = [
     ...PRESET_CATEGORY_ORDER.map(name => ({ name, presets: PRESETS.filter(p => p.category === name) })),
-    ...presentVerticals.map(v => ({ name: v.name, presets: verticalPresets(v) })),
+    ...presentVerticals.map(v => ({
+      name: v.name,
+      verticalId: v.id,
+      presets: [
+        ...verticalPresets(v),
+        ...(smartPresetsByVertical[v.id] ?? []).map((sp): Preset => ({
+          id: sp.id, q: sp.q, category: v.name, verticalId: v.id, isSmart: true,
+          run: () => ({ answer: '', nodeIds: [] }), // never called — runPreset() branches on isSmart first
+        })),
+      ],
+    })),
   ]
 
   // Live Aura instance metadata + schema counts for the "it's real" demo chrome.
@@ -1201,13 +1256,18 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           )}
 
           <div style={styles.presetScroll}>
-            {presetGroups.filter(grp => grp.presets.length > 0).map(grp => (
+            {presetGroups.filter(grp => grp.presets.length > 0 || (grp.verticalId && smartGenerating.has(grp.verticalId))).map(grp => (
               <div key={grp.name}>
-                <div style={styles.presetCategoryHead}>{grp.name.toUpperCase()}</div>
+                <div style={styles.presetCategoryHead}>
+                  {grp.name.toUpperCase()}
+                  {grp.verticalId && smartGenerating.has(grp.verticalId) && (
+                    <span style={styles.smartGeneratingNote}> · ✦ studying this data…</span>
+                  )}
+                </div>
                 <div style={styles.presetList}>
                   {grp.presets.map(p => (
-                    <button key={p.id} style={styles.presetChip} onClick={() => runPreset(p)}>
-                      {p.q}
+                    <button key={p.id} style={styles.presetChip} onClick={() => runPreset(p)} title={p.isSmart ? 'Auto-generated from this vertical’s live data' : undefined}>
+                      {p.isSmart ? `✦ ${p.q}` : p.q}
                     </button>
                   ))}
                 </div>
@@ -1510,6 +1570,7 @@ function makeStyles(mode: ThemeMode): Styles {
     filterDivider: { borderTop: `1px solid ${t.border}`, margin: '12px 0' },
     presetScroll: { maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 },
     presetCategoryHead: { fontSize: 9, letterSpacing: '.16em', color: t.faint, marginTop: 6 },
+    smartGeneratingNote: { fontSize: 9, letterSpacing: 'normal', textTransform: 'none' as const, color: t.muted },
     presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 },
     presetChip: {
       textAlign: 'left', background: t.btn, border: `1px solid ${t.border}`, borderRadius: 4,

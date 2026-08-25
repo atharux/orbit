@@ -20,6 +20,13 @@ export interface Preset {
   category: string
   verticalId?: string // set only for vertical-scoped presets — undefined means generic
   run: (g: GraphData) => AskResult
+  // Set on presets synthesized by smartPresets.ts (a question grounded in a
+  // live schema profile, generated once per vertical). runPreset() in
+  // GraphOverlay.tsx branches on this to route through the live NL-ask
+  // pipeline (askLive) instead of calling run() against the in-memory graph
+  // -- a smart preset has no precomputed client-side filter logic, only a
+  // question text for the LLM to turn into Cypher, same as typing it in.
+  isSmart?: boolean
 }
 
 // --- small adjacency helpers ------------------------------------------------

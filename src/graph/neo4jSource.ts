@@ -93,6 +93,34 @@ function nodeToGraphNode(n: any): GraphNode | null {
   }
 }
 
+// Run an arbitrary READ query and return plain, JSON-serializable rows --
+// unlike runReadCypher below (built for the ask panel's "highlight these
+// nodes" use case, which only returns a summary + elementIds), this is for
+// callers that need the actual values, e.g. smartPresets.ts profiling a
+// vertical's shape before asking an LLM to propose questions about it.
+export async function runReadRows(
+  cypher: string,
+  params: Record<string, unknown> = {},
+): Promise<Record<string, any>[]> {
+  if (!isLiveConfigured()) throw new Error('Neo4j not configured — add your Aura connection in Settings')
+  const { uri, user, pass, db } = creds()
+  const driver = neo4j.driver(uri!, neo4j.auth.basic(user!, pass!))
+  try {
+    const result = await driver.executeQuery(cypher, params, { database: db, routing: 'READ' as any })
+    return result.records.map(rec => {
+      const row: Record<string, any> = {}
+      for (const key of rec.keys) {
+        const v: any = rec.get(key)
+        // Neo4j Integer -> plain number (safe well under 2^53 for our counts).
+        row[key as string] = v && typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : v
+      }
+      return row
+    })
+  } finally {
+    await driver.close()
+  }
+}
+
 // Run an arbitrary READ query (used by the free-text "ask the graph" panel).
 // executeRead rejects any write — the LLM-generated Cypher can only read.
 // Returns a human summary + the elementIds of any Node values in the result,
