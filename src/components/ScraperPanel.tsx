@@ -55,6 +55,7 @@ export function ScraperPanel({ vertical, existingLeads, aiOptions, onLeadsAdded,
   }
 
   async function discover() {
+    if (vertical.discoveryMode === 'none') { setError(`${vertical.name} has no live discovery — leads only arrive via import`); return }
     if (!location.trim()) return
     const cats = Array.from(activeCategories)
     if (!cats.length) { setError('Select at least one category'); return }
@@ -193,7 +194,7 @@ export function ScraperPanel({ vertical, existingLeads, aiOptions, onLeadsAdded,
               {vertical.icon} Discover {vertical.name} leads
             </div>
             <div className="panel-sub">
-            {vertical.discoveryMode === 'appstore' ? 'iTunes Search API · Apple' : vertical.discoveryMode === 'worker' ? 'venue-scraper · Worker' : 'Overpass API · OpenStreetMap'}
+            {vertical.discoveryMode === 'appstore' ? 'iTunes Search API · Apple' : vertical.discoveryMode === 'worker' ? 'venue-scraper · Worker' : vertical.discoveryMode === 'none' ? 'Import only — no live discovery' : 'Overpass API · OpenStreetMap'}
           </div>
           </div>
           <button className="panel-close" onClick={onClose}>×</button>

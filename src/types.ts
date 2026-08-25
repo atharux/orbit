@@ -72,7 +72,11 @@ export interface Vertical {
   // 'worker' = venue-scraper Cloudflare Worker (nightlife only)
   // 'overpass' = direct Overpass API query (all other verticals)
   // 'appstore' = Apple iTunes Search API (dev-studios); categories are search terms, not OSM tags
-  discoveryMode?: 'worker' | 'overpass' | 'appstore'
+  // 'none' = no live discovery at all — leads only ever arrive via an external import
+  //   (e.g. linkedinImport.ts). ScraperPanel refuses to run discover() for this mode,
+  //   regardless of any category the user types in — omitting discoveryMode entirely
+  //   is NOT equivalent: an undefined mode still falls through to the Overpass branch.
+  discoveryMode?: 'worker' | 'overpass' | 'appstore' | 'none'
   isCustom?: boolean
 }
 
