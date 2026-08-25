@@ -705,8 +705,16 @@ a { color: inherit; text-decoration: none }
   border-radius: var(--radius-lg);
   width: 100%;
   max-width: 440px;
+  /* .modal-overlay contributes 24px of padding on each side (48px total) --
+     without this cap, a modal taller than the window (SettingsModal, once
+     the Neo4j Aura fields were added) pushes its own footer off-screen with
+     no way to reach Save/Cancel: overflow:hidden here only clips rounded
+     corners, it doesn't create a scrollbar. */
+  max-height: calc(100vh - 48px);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal-header {
@@ -715,11 +723,22 @@ a { color: inherit; text-decoration: none }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
 }
 
 .modal-title { font-weight: 600; font-size: 15px }
 
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 16px }
+.modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  /* flex-basis:auto alone lets this child grow past its flex parent instead
+     of shrinking to fit -- min-height:0 is what actually makes overflow-y
+     scroll kick in rather than the modal just growing past max-height. */
+  min-height: 0;
+}
 
 .modal-footer {
   padding: 16px 20px;
@@ -727,6 +746,7 @@ a { color: inherit; text-decoration: none }
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .color-swatches {
