@@ -17,6 +17,24 @@
 import type { Vertical } from '../types'
 import { runReadRows } from './neo4jSource'
 import { generateJSON } from '../services/orClient'
+import { isMcpAvailable, callMcpTool } from './mcpClient'
+
+// Profiling goes through the real MCP server (mcpClient.ts -> mcp-neo4j-cypher's
+// read_neo4j_cypher tool) when it's running locally, falling back to the direct
+// driver (runReadRows) when it isn't -- the MCP server is a separate local
+// process someone has to launch, so this can't be a hard dependency without
+// breaking smart-preset generation whenever it's not running.
+async function readRows(cypher: string, params: Record<string, unknown>): Promise<Record<string, any>[]> {
+  if (await isMcpAvailable()) {
+    try {
+      const rows = await callMcpTool('read_neo4j_cypher', { query: cypher, params })
+      if (Array.isArray(rows)) return rows
+    } catch (err) {
+      console.warn('MCP read_neo4j_cypher failed, falling back to direct driver', err)
+    }
+  }
+  return runReadRows(cypher, params)
+}
 
 export interface SmartPreset {
   id: string
@@ -53,17 +71,17 @@ function saveSmartPresets(verticalId: string, presets: SmartPreset[]): void {
 // for grounding (same data already visible on-screen in the graph itself).
 async function profileVertical(verticalId: string): Promise<string> {
   const [labelCounts, relCounts, propCoverage, samples] = await Promise.all([
-    runReadRows(`MATCH (n) WHERE n.vertical_id = $vid RETURN labels(n)[0] AS label, count(n) AS n`, { vid: verticalId }),
-    runReadRows(
+    readRows(`MATCH (n) WHERE n.vertical_id = $vid RETURN labels(n)[0] AS label, count(n) AS n`, { vid: verticalId }),
+    readRows(
       `MATCH (a)-[r]->(b) WHERE a.vertical_id = $vid OR b.vertical_id = $vid RETURN type(r) AS rel, count(r) AS n`,
       { vid: verticalId },
     ),
-    runReadRows(
+    readRows(
       `MATCH (n) WHERE n.vertical_id = $vid UNWIND keys(n) AS k
        RETURN labels(n)[0] AS label, k AS prop, count(n) AS withProp ORDER BY label, withProp DESC`,
       { vid: verticalId },
     ),
-    runReadRows(
+    readRows(
       `MATCH (n) WHERE n.vertical_id = $vid AND n.name IS NOT NULL
        WITH labels(n)[0] AS label, n.name AS name
        WITH label, collect(DISTINCT name)[0..5] AS names
