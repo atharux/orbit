@@ -37,7 +37,14 @@ const DEPRIORITISE_RE = /gemma/i;
 const SPECIALISED_RE = /content-safety|guard|moderation|lyria|whisper|embed|rerank/i;
 
 const RATE_LIMIT_RE = /rate.limit|too many requests|429/i;
-const MODEL_UNAVAILABLE_RE = /unavailable|not found|does not exist|quota|no endpoints/i;
+// "only available on agentic harnesses" is a real OpenRouter error class seen
+// live (thinkingmachines/inkling-small:free and others) -- some free models
+// are gated to require a recognized agent/coding-tool client and reject a
+// plain chat-completions call from an app like this one. Confirmed this
+// wasn't caught before: it doesn't contain "unavailable" (no "un" prefix),
+// so it fell through every existing branch and surfaced as a hard error to
+// the user instead of silently advancing to the next model in the queue.
+const MODEL_UNAVAILABLE_RE = /unavailable|not found|does not exist|quota|no endpoints|agentic harness/i;
 
 let MEM_CACHE: { models: string[]; at: number } = { models: [], at: 0 };
 const hasLS = typeof localStorage !== 'undefined';
