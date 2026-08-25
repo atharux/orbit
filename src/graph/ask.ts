@@ -604,6 +604,7 @@ Schema:
 Rules:
 - READ ONLY. Never CREATE/MERGE/SET/DELETE/REMOVE/CALL {}/LOAD.
 - Always RETURN the node(s) the question is about (not just counts) so they can be highlighted.
+- If you aggregate/count/group, ALSO return a readable identifying property (e.g. v.name, c.title) alongside the number in the same row -- not just the count alone. The result becomes a spoken answer, and "6; 3; 3" with no label reads as noise, not an answer.
 - Return ONLY the Cypher, no prose, no markdown fences.`
 
 export function liveAvailable(apiKey?: string): boolean {

@@ -121,6 +121,28 @@ export async function runReadRows(
   }
 }
 
+// Renders a query's actual scalar values into a short readable line, instead
+// of just a row count -- e.g. an aggregate query grouping/counting something
+// (exactly the shape smartPresets.ts's generated questions tend to produce)
+// reads as "Senior Software Engineer (6), Founder (5), Designer (3)", not
+// just "10 rows returned". Skips Node/Relationship/array values (those get
+// highlighted in the 3D scene instead, via nodeIds) -- only plain
+// scalars (the count/label columns an aggregate actually returns) print.
+function summarizeRows(records: { keys: readonly PropertyKey[]; get(key: any): any }[]): string | null {
+  const lines: string[] = []
+  for (const rec of records.slice(0, 8)) {
+    const parts: string[] = []
+    for (const key of rec.keys) {
+      let v: any = rec.get(key)
+      if (v && typeof v === 'object' && typeof v.toNumber === 'function') v = v.toNumber() // Neo4j Integer -> plain number
+      if (v === null || v === undefined || typeof v === 'object') continue // Node/Relationship/array
+      parts.push(String(v))
+    }
+    if (parts.length) lines.push(parts.join(' — '))
+  }
+  return lines.length ? lines.join('; ') : null
+}
+
 // Run an arbitrary READ query (used by the free-text "ask the graph" panel).
 // executeRead rejects any write — the LLM-generated Cypher can only read.
 // Returns a human summary + the elementIds of any Node values in the result,
@@ -144,7 +166,10 @@ export async function runReadCypher(
       }
     }
     const rows = result.records.length
-    return { summary: `${rows} row${rows === 1 ? '' : 's'} returned`, nodeIds: [...nodeIds], rows }
+    const rowLabel = `${rows} row${rows === 1 ? '' : 's'} returned`
+    const preview = rows > 0 ? summarizeRows(result.records) : null
+    const truncated = preview && rows > 8 ? ` (+${rows - 8} more)` : ''
+    return { summary: preview ? `${rowLabel}: ${preview}${truncated}` : rowLabel, nodeIds: [...nodeIds], rows }
   } finally {
     await driver.close()
   }
