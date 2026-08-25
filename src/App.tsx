@@ -17,6 +17,7 @@ import { SettingsModal } from './components/SettingsModal'
 // Heavy (Three.js) — only pulled in when the graph view is opened.
 const GraphOverlay = lazy(() => import('./graph/GraphOverlay').then(m => ({ default: m.GraphOverlay })))
 const AboutExhibit = lazy(() => import('./about/AboutExhibit').then(m => ({ default: m.AboutExhibit })))
+const PitchOverlay = lazy(() => import('./pitch/PitchOverlay').then(m => ({ default: m.PitchOverlay })))
 const SequencesPanel = lazy(() => import('./sequences/SequencesPanel').then(m => ({ default: m.SequencesPanel })))
 const ImportModal = lazy(() => import('./import/ImportModal').then(m => ({ default: m.ImportModal })))
 const BackupModal = lazy(() => import('./backup/BackupModal').then(m => ({ default: m.BackupModal })))
@@ -37,6 +38,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [pitchOpen, setPitchOpen] = useState(false)
   const [sequencesOpen, setSequencesOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [backupOpen, setBackupOpen] = useState(false)
@@ -421,6 +423,14 @@ export function App() {
         <button
           className="btn btn-ghost"
           style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
+          onClick={() => setPitchOpen(true)}
+          title="Hackathon pitch + the Cypher tutorial"
+        >
+          Pitch
+        </button>
+        <button
+          className="btn btn-ghost"
+          style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
           onClick={() => setGraphOpen(true)}
           title="Open the immersive graph view"
         >
@@ -698,6 +708,12 @@ export function App() {
       {aboutOpen && (
         <Suspense fallback={null}>
           <AboutExhibit onClose={() => setAboutOpen(false)} />
+        </Suspense>
+      )}
+
+      {pitchOpen && (
+        <Suspense fallback={null}>
+          <PitchOverlay onClose={() => setPitchOpen(false)} />
         </Suspense>
       )}
 

@@ -1,0 +1,304 @@
+<title>Orbit Pitch</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Mono:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+  :root {
+    --paper:      #efeadd;
+    --plate:      #fbf8ef;
+    --plate-2:    #f4efe1;
+    --ink:        #201e18;
+    --body:       #47433a;
+    --muted:      #56514a;
+    --faint:      #8b8677;
+    --rule:       #d3cbb8;
+    --rule-firm:  #c3bba6;
+
+    --teal:       #2f7d84;
+    --purple:     #6a5aa6;
+    --linkedin:   #0a66c2;
+    --edge:       #3b6ea5;
+    --teal-wash:      #2f7d8414;
+    --purple-wash:    #6a5aa614;
+    --linkedin-wash:  #0a66c214;
+
+    --disp: 'Syne', system-ui, -apple-system, sans-serif;
+    --mono: 'DM Mono', 'Space Mono', ui-monospace, SFMono-Regular, monospace;
+    --radius: 3px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #05060a;
+      --plate: #0c0e14;
+      --plate-2: #10131b;
+      --ink: #e5e7eb;
+      --body: #c3c9d4;
+      --muted: #94a3b8;
+      --faint: #64748b;
+      --rule: #1c212b;
+      --rule-firm: #2a3140;
+      --teal: #22d3ee;
+      --purple: #a78bfa;
+      --linkedin: #4098ea;
+      --edge: #3b9eff;
+      --teal-wash: #22d3ee14;
+      --purple-wash: #a78bfa14;
+      --linkedin-wash: #4098ea18;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #05060a;
+    --plate: #0c0e14;
+    --plate-2: #10131b;
+    --ink: #e5e7eb;
+    --body: #c3c9d4;
+    --muted: #94a3b8;
+    --faint: #64748b;
+    --rule: #1c212b;
+    --rule-firm: #2a3140;
+    --teal: #22d3ee;
+    --purple: #a78bfa;
+    --linkedin: #4098ea;
+    --edge: #3b9eff;
+    --teal-wash: #22d3ee14;
+    --purple-wash: #a78bfa14;
+    --linkedin-wash: #4098ea18;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--body);
+    font-family: var(--mono);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+  }
+
+  .slide {
+    width: 100%;
+    max-width: 1240px;
+    aspect-ratio: 16 / 9;
+    background: var(--plate);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 40px 52px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 30px 80px -30px rgba(0,0,0,0.35);
+  }
+
+  /* faint corner glow, orbit-style */
+  .slide::before {
+    content: '';
+    position: absolute;
+    top: -220px; right: -180px;
+    width: 520px; height: 520px;
+    background: radial-gradient(circle, var(--teal-wash) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .brandrow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    z-index: 1;
+  }
+  .brand {
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .brand-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--teal);
+    display: inline-block;
+    transform: translateY(-1px);
+    box-shadow: 0 0 10px var(--teal);
+  }
+  .brand-name {
+    font-family: var(--disp); font-weight: 800; font-size: 15px;
+    letter-spacing: .14em; color: var(--ink);
+  }
+  .brand-sub {
+    font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
+  }
+  .tag {
+    font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+    border: 1px solid var(--rule-firm); padding: 5px 10px; border-radius: 20px;
+  }
+
+  h1 {
+    font-family: var(--disp); font-weight: 700; color: var(--ink);
+    font-size: clamp(26px, 3.4vw, 40px);
+    line-height: 1.14; letter-spacing: -.01em; margin: 0;
+    text-wrap: balance; max-width: 15ch;
+    z-index: 1;
+  }
+  h1 em { font-style: normal; color: var(--teal); }
+
+  .lede {
+    font-size: 13px; color: var(--muted); max-width: 62ch; margin: 0;
+    line-height: 1.6;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 2px;
+    z-index: 1;
+  }
+  .card {
+    background: var(--plate-2);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 13px 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .card-num {
+    font-size: 10px; color: var(--faint); letter-spacing: .1em;
+  }
+  .card-title {
+    font-family: var(--disp); font-weight: 700; color: var(--ink);
+    font-size: 13.5px; line-height: 1.28;
+  }
+  .card-body {
+    font-size: 11px; color: var(--muted); line-height: 1.5;
+  }
+  .card-body b { color: var(--body); font-weight: 500; }
+  .card.accent-teal { border-color: color-mix(in srgb, var(--teal) 40%, var(--rule)); }
+  .card.accent-purple { border-color: color-mix(in srgb, var(--purple) 40%, var(--rule)); }
+  .card.accent-linkedin { border-color: color-mix(in srgb, var(--linkedin) 45%, var(--rule)); }
+
+  .thesis {
+    font-family: var(--disp); font-weight: 600; font-size: 13px; color: var(--ink);
+    border-left: 2px solid var(--teal); padding-left: 12px; margin: 2px 0 0;
+    max-width: 60ch; z-index: 1;
+  }
+
+  .next {
+    margin-top: auto;
+    border-top: 1px solid var(--rule);
+    padding-top: 14px;
+    z-index: 1;
+  }
+  .next-head {
+    display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
+  }
+  .next-label {
+    font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
+  }
+  .next-title {
+    font-family: var(--disp); font-weight: 700; font-size: 15px; color: var(--ink);
+  }
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    align-items: stretch;
+  }
+  .step {
+    position: relative;
+    padding: 0 16px 0 0;
+  }
+  .step:not(:last-child)::after {
+    content: '→';
+    position: absolute;
+    right: -2px; top: 2px;
+    color: var(--faint); font-size: 12px;
+  }
+  .step-k {
+    font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--edge);
+    margin-bottom: 3px;
+  }
+  .step-t {
+    font-size: 11.5px; color: var(--ink); font-weight: 500; line-height: 1.4;
+  }
+  .step-d {
+    font-size: 10px; color: var(--faint); line-height: 1.45; margin-top: 3px;
+  }
+
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+    .flow { grid-template-columns: repeat(2, 1fr); row-gap: 14px; }
+    .step:nth-child(2)::after { display: none; }
+  }
+</style>
+
+<div class="stage">
+  <div class="slide">
+    <div class="brandrow">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">ORBIT</span>
+        <span class="brand-sub">graph space</span>
+      </div>
+      <span class="tag">LIVE · NEO4J AURA</span>
+    </div>
+
+    <h1>Your data already knows things.<br><em>Orbit asks it the right questions.</em></h1>
+
+    <p class="thesis">Point Orbit at any dataset with relationships — a network, a lead list, anything — and it builds the graph, studies it live over MCP, and hands you grounded questions before you even ask.</p>
+
+    <div class="grid">
+      <div class="card accent-teal">
+        <span class="card-num">01</span>
+        <span class="card-title">Who do I already know at X?</span>
+        <span class="card-body">Before any cold outreach — <b>n8n (6), Tavily (3), Deutsche Bank (3)</b> surfaced straight from a real LinkedIn import.</span>
+      </div>
+      <div class="card accent-teal">
+        <span class="card-num">02</span>
+        <span class="card-title">Live-event networking</span>
+        <span class="card-body">Your own graph surfaced <b>Hackathon Hub, CyberDesk, Agent F</b> — people here today, found automatically.</span>
+      </div>
+      <div class="card accent-purple">
+        <span class="card-num">03</span>
+        <span class="card-title">A catalog that writes itself</span>
+        <span class="card-body">No hardcoded questions per dataset — an LLM profiles the live schema over the real Neo4j MCP server and proposes its own.</span>
+      </div>
+      <div class="card accent-linkedin">
+        <span class="card-num">04</span>
+        <span class="card-title">One engine, every dataset</span>
+        <span class="card-body">Same graph already runs a live multi-vertical lead pipeline — not a LinkedIn toy, a general relationship engine.</span>
+      </div>
+    </div>
+
+    <div class="next">
+      <div class="next-head">
+        <span class="next-label">Next</span>
+        <span class="next-title">Deeper insights extraction</span>
+      </div>
+      <div class="flow">
+        <div class="step">
+          <div class="step-k">Today</div>
+          <div class="step-t">Shallow profile</div>
+          <div class="step-d">Counts + coverage → one LLM call → a list of questions to click.</div>
+        </div>
+        <div class="step">
+          <div class="step-k">Next</div>
+          <div class="step-t">Agentic reasoning loop</div>
+          <div class="step-d">LLM calls <code>read_neo4j_cypher</code> over MCP repeatedly — testing hypotheses, not answering once.</div>
+        </div>
+        <div class="step">
+          <div class="step-k">Next</div>
+          <div class="step-t">Real structural signal</div>
+          <div class="step-d">Centrality &amp; community detection (Neo4j GDS) — who's a bridge, not just who's connected.</div>
+        </div>
+        <div class="step">
+          <div class="step-k">Next</div>
+          <div class="step-t">Written insight cards</div>
+          <div class="step-d">A synthesized finding, not a question — auto-refreshed as new data lands.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
