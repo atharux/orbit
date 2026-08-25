@@ -77,6 +77,18 @@ export const BUILT_IN_VERTICALS: Vertical[] = [
     discoveryMode: 'appstore',
   },
   {
+    id: 'linkedin',
+    name: 'LinkedIn Connections',
+    icon: '◑',
+    color: '#0A66C2', // LinkedIn blue — reads as "this came from LinkedIn" at a glance
+    // No discovery query at all: contacts land here only via
+    // `node src/graph/linkedinImport.ts <csv> linkedin`, which tags every
+    // imported Contact's vertical_id directly. Nothing to search, so no
+    // osmCategories/discoveryMode — the Scraper panel's "Discover" button
+    // is a no-op for this vertical by construction (empty category list).
+    osmCategories: [],
+  },
+  {
     id: 'professional',
     name: 'Professional Services',
     icon: '○',
