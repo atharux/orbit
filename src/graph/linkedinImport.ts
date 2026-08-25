@@ -75,10 +75,13 @@ const HEADER_ALIASES: Record<string, string[]> = {
   fullName: ['full name', 'name'],
   firstName: ['first name'],
   lastName: ['last name'],
-  title: ['title', 'position', 'headline', 'job title', 'current position'],
-  company: ['company', 'current company', 'account name', 'company name'],
-  profileUrl: ['profile url', 'linkedin profile', 'profile link', 'linkedin url', 'url'],
-  location: ['location', 'geography', 'region'],
+  title: ['title', 'position', 'headline', 'job title', 'current position', 'current position/job title'],
+  company: ['company', 'current company', 'account name', 'company name', 'current company details'],
+  profileUrl: ['profile url', 'linkedin profile', 'profile link', 'linkedin url', 'url', 'linkedin profile url'],
+  // 'city' is a lower-fidelity stand-in for 'location' (e.g. "Current Position/Job title,
+  // Current Company Details, LinkedIn Profile URL"-style exports carry Country/City
+  // separately, no single "location" column) -- city alone is still a useful signal.
+  location: ['location', 'geography', 'region', 'city'],
   industry: ['industry'],
 }
 
@@ -202,9 +205,14 @@ function toContactRow(p: ParsedRow, verticalId: string, importedAt: string): Con
 // minting a Venue for. Without this filter, every self-employed/freelance
 // connection in a 2000-row export would MERGE onto one shared "Freelance"
 // node and read as colleagues of hundreds of unrelated people.
+// Confirmed against a real 355-row Berlin/EU export: "self employed" (space,
+// not hyphen) and the German "Selbstständig" both slipped past an
+// English-only, hyphen-only list and clustered unrelated people as
+// "colleagues". Kept case-insensitive by the query (toLower on both sides).
 const PLACEHOLDER_COMPANIES = new Set([
-  'self-employed', 'freelance', 'freelancer', 'independent', 'independent consultant',
-  'n/a', 'na', 'none', '-', 'unemployed', 'retired', 'student', 'stealth', 'stealth mode', 'confidential',
+  'self-employed', 'self employed', 'selbstständig', 'selbststandig', 'selbständig', 'selbstaendig',
+  'freelance', 'freelancer', 'freiberufler', 'freiberuflich', 'independent', 'independent consultant',
+  'n/a', 'na', 'none', '-', 'unemployed', 'arbeitslos', 'retired', 'student', 'stealth', 'stealth mode', 'confidential',
 ])
 
 // Single query per row (via UNWIND) so the name-fallback match, the Contact
