@@ -17,14 +17,22 @@ import { SettingsModal } from './components/SettingsModal'
 // Heavy (Three.js) — only pulled in when the graph view is opened.
 const GraphOverlay = lazy(() => import('./graph/GraphOverlay').then(m => ({ default: m.GraphOverlay })))
 const AboutExhibit = lazy(() => import('./about/AboutExhibit').then(m => ({ default: m.AboutExhibit })))
+const PitchOverlay = lazy(() => import('./pitch/PitchOverlay').then(m => ({ default: m.PitchOverlay })))
+import type { PitchTab } from './pitch/PitchOverlay'
 const SequencesPanel = lazy(() => import('./sequences/SequencesPanel').then(m => ({ default: m.SequencesPanel })))
 const ImportModal = lazy(() => import('./import/ImportModal').then(m => ({ default: m.ImportModal })))
 const BackupModal = lazy(() => import('./backup/BackupModal').then(m => ({ default: m.BackupModal })))
 
-// Cheap env check — the actual sync module (pulls neo4j-driver) is lazy-loaded.
-const SYNC_ENABLED = Boolean(
-  import.meta.env.VITE_NEO4J_URI && import.meta.env.VITE_NEO4J_USERNAME && import.meta.env.VITE_NEO4J_PASSWORD,
-)
+// Cheap check — reads Settings (localStorage) directly rather than importing
+// neo4jSource.ts's isLiveConfigured(), which would pull the whole neo4j
+// driver into the main bundle; the actual sync/reconcile modules that use it
+// stay lazy-loaded. Settings.neo4jUri etc. already default from VITE_NEO4J_*
+// (see settings.ts), so this covers both local dev (.env) and a packaged
+// build where credentials were entered in the Settings UI instead.
+function liveGraphConfigured(): boolean {
+  const s = loadSettings()
+  return Boolean(s.neo4jUri && s.neo4jUsername && s.neo4jPassword)
+}
 
 export function App() {
   const [verticals, setVerticals] = useState<Vertical[]>(loadAllVerticals)
@@ -37,14 +45,21 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [pitchOpen, setPitchOpen] = useState(false)
+  const [pitchInitialTab, setPitchInitialTab] = useState<PitchTab>('pitch')
   const [sequencesOpen, setSequencesOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [backupOpen, setBackupOpen] = useState(false)
   const [backupFolder, setBackupFolder] = useState<string | null>(null)
+  const [backupPromptDismissed, setBackupPromptDismissed] = useState(
+    () => localStorage.getItem('pocket-leads:backup-prompt-dismissed') === 'true',
+  )
   const [bulkEnriching, setBulkEnriching] = useState(false)
   const [graphSync, setGraphSync] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle')
   const [graphSyncMsg, setGraphSyncMsg] = useState('')
-  const syncEnabled = SYNC_ENABLED
+  const syncEnabled = liveGraphConfigured()
+  const [reconciling, setReconciling] = useState(false)
+  const [reconcileMsg, setReconcileMsg] = useState('')
   const [settings, setSettings] = useState<AppSettings>(loadSettings)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<OutreachStatus | null>(null)
@@ -196,6 +211,30 @@ export function App() {
       })
   }
 
+  // The reverse direction of pushToGraph: pull whatever's really in Neo4j for
+  // the active vertical back into local storage. Needed because a Venue can
+  // exist in Aura without ever having been a local lead -- seeded directly by
+  // scripts/load_graph.py, or by linkedinImport.ts -- so the Leads dashboard
+  // (local storage only) shows "no leads yet" even when the graph view shows
+  // hundreds of live nodes.
+  async function handleReconcileFromGraph() {
+    if (!syncEnabled || reconciling) return
+    setReconciling(true); setReconcileMsg('')
+    try {
+      const { reconcileLeadsFromNeo4j } = await import('./graph/reconcileFromNeo4j')
+      const otherVerticals = leads.filter(l => l.vertical_id !== activeVerticalId)
+      const { leads: reconciled, summary } = await reconcileLeadsFromNeo4j(activeVertical, verticalLeads)
+      const merged = [...otherVerticals, ...reconciled]
+      setLeads(merged)
+      await replaceLeads(merged)
+      setReconcileMsg(`${summary.created} new, ${summary.updated} updated from ${summary.total} in Aura`)
+    } catch (err: any) {
+      setReconcileMsg(String(err?.message ?? err))
+    } finally {
+      setReconciling(false)
+    }
+  }
+
   async function handleLeadsAdded(newLeads: Lead[]) {
     const all = dedupeLeads([...leads, ...newLeads])
     setLeads(all)
@@ -338,6 +377,11 @@ export function App() {
     if (activeVerticalId === id) setActiveVerticalId(verticals[0]?.id ?? 'nightlife')
   }
 
+  function dismissBackupPrompt() {
+    localStorage.setItem('pocket-leads:backup-prompt-dismissed', 'true')
+    setBackupPromptDismissed(true)
+  }
+
   function handleSaveSettings(s: AppSettings) {
     saveSettings(s)
     setSettings(s)
@@ -402,6 +446,26 @@ export function App() {
             {graphSyncMsg}
           </span>
         )}
+        {syncEnabled && (
+          <button
+            className="btn btn-ghost"
+            style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
+            onClick={handleReconcileFromGraph}
+            disabled={reconciling}
+            title={`Pull real ${activeVertical.name} data from Neo4j Aura into this Leads dashboard`}
+          >
+            {reconciling ? 'Loading…' : `Load ${activeVertical.name} from Aura`}
+          </button>
+        )}
+        {reconcileMsg && (
+          <span
+            className="mono"
+            style={{ fontSize: 10, color: 'var(--muted)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={reconcileMsg}
+          >
+            {reconcileMsg}
+          </span>
+        )}
         <button
           className="btn btn-ghost"
           style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
@@ -409,6 +473,14 @@ export function App() {
           title="How Orbit works — the interactive exhibit"
         >
           About
+        </button>
+        <button
+          className="btn btn-ghost"
+          style={{ height: 30, fontSize: 11, letterSpacing: '.06em' }}
+          onClick={() => { setPitchInitialTab('pitch'); setPitchOpen(true) }}
+          title="Hackathon pitch + the Cypher tutorial"
+        >
+          Pitch
         </button>
         <button
           className="btn btn-ghost"
@@ -474,6 +546,28 @@ export function App() {
           )}
         </button>
       </header>
+
+      {!loading && !backupFolder && leads.length > 0 && !backupPromptDismissed && (
+        <div
+          className="mono"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px',
+            background: 'rgba(245,158,11,.08)', borderBottom: '1px solid rgba(245,158,11,.25)',
+            fontSize: 11.5, color: 'var(--text)',
+          }}
+        >
+          <span style={{ color: '#f59e0b' }}>⛁ !</span>
+          <span style={{ flex: 1 }}>
+            {leads.length} lead{leads.length === 1 ? '' : 's'} live only in this browser/app's local storage — no backup folder set. Lose this install and they're gone.
+          </span>
+          <button className="btn btn-primary" style={{ height: 26, fontSize: 11 }} onClick={() => setBackupOpen(true)}>
+            Set up backup
+          </button>
+          <button className="btn btn-ghost" style={{ height: 26, fontSize: 11 }} onClick={dismissBackupPrompt}>
+            Not now
+          </button>
+        </div>
+      )}
 
       <VerticalPicker
         verticals={verticals}
@@ -661,6 +755,7 @@ export function App() {
               const l = leads.find(x => x.id === id)
               if (l) { setGraphOpen(false); setSelectedLead(l) }
             }}
+            onOpenCypherTutorial={() => { setGraphOpen(false); setPitchInitialTab('cypher'); setPitchOpen(true) }}
           />
         </Suspense>
       )}
@@ -668,6 +763,12 @@ export function App() {
       {aboutOpen && (
         <Suspense fallback={null}>
           <AboutExhibit onClose={() => setAboutOpen(false)} />
+        </Suspense>
+      )}
+
+      {pitchOpen && (
+        <Suspense fallback={null}>
+          <PitchOverlay onClose={() => setPitchOpen(false)} initialTab={pitchInitialTab} />
         </Suspense>
       )}
 

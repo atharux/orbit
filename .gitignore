@@ -26,3 +26,6 @@ OPERATOR-BRIEF.md
 # Tauri / Rust build artifacts
 src-tauri/target/
 src-tauri/gen/
+
+# Local code-review harness marker — machine/session state, not shared
+.claude/last-review.json

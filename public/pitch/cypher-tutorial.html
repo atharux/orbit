@@ -1,0 +1,723 @@
+<!doctype html><html><head><!-- frame-runtime --><base href="/_f/1787397569-8611/"><script>window.__FRAME_PREAMBLE={"capabilities":{"artifact":"artifact.oqIe8shs.js","assets":"assets.BkxVItX2.js","comments":"comments.GLuHR3zP.js","db":"db.CRhVHzSt.js","downloads":"downloads.C3GSvEDP.js","embed":"embed.CZsbekoQ.js","mcp":"mcp.D3B2EyQu.js","permissions":"permissions.BNySkLV5.js","room":"room.DE7EMui-.js","sample":"sample.C7z_6W62.js","self":"artifact.oqIe8shs.js","user":"user.BpKav-Rf.js"},"transforms":"_transforms.h3_8GSUa.js","comments":"_comments.BOgkE6qU.js","translate":"_translate.5HCW4BJh.js"}</script><script>(function(){"use strict";var Y=["light","dark","system"],X=/^[A-Za-z0-9_-]{1,64}$/,D=/^[a-zA-Z_:][a-zA-Z0-9_:.-]{0,127}$/,G=new Set(["class","hidden","value","checked"]);function V(e){const t=e.toLowerCase();return t.startsWith("data-")||t.startsWith("aria-")||G.has(t)}var be="http://www.w3.org/1999/xhtml",Z="http://www.w3.org/2000/svg",J=new Set(["script","style","iframe","noscript","noframes","noembed","xmp","plaintext","template","title","textarea","object","embed"]),Q=new Set(["script","style"]);function ee(e){const t=e.localName.toLowerCase();return e.namespaceURI==="http://www.w3.org/1999/xhtml"?!J.has(t):e.namespaceURI===Z?!Q.has(t):!1}var te=new Set(["html","head","body","frameset"]);function re(e){return e.namespaceURI==="http://www.w3.org/1999/xhtml"&&te.has(e.localName)}function ne(e){if(e===null||typeof e!="object")return!1;const t=e;if(typeof t.target!="string"||!X.test(t.target)||t.text!==void 0&&typeof t.text!="string")return!1;if(t.attrsSet!==void 0){if(t.attrsSet===null||typeof t.attrsSet!="object")return!1;for(const[n,s]of Object.entries(t.attrsSet))if(!D.test(n)||typeof s!="string")return!1}if(t.attrsRemoved!==void 0){if(!Array.isArray(t.attrsRemoved))return!1;for(const n of t.attrsRemoved)if(typeof n!="string"||!D.test(n))return!1}return!0}function se(e,t){if(e===null||typeof e!="object")return!1;const{seq:n,elements:s}=e;if(typeof n!="number"||!Number.isSafeInteger(n)||!Array.isArray(s)||s.length===0||s.length>64)return!1;for(let o=0;o<s.length;o++)if(!t(s[o]))return!1;return!0}function ae(e){return e===null||typeof e!="object"?!1:se(e.__frame_patch,ne)}function oe(e){if(e===null||typeof e!="object")return!1;const t=e.__frame_init;return t!==null&&typeof t=="object"}function ie(e){return e!==null&&typeof e=="object"&&e.__frame_size_poke===!0}function le(e){if(e===null||typeof e!="object")return!1;const t=e.__frame_theme;if(t===null||typeof t!="object")return!1;const n=t.theme;return typeof n=="string"&&Y.includes(n)}var O="__frame_scroll",ce=150,ue=310,fe=160,pe=3e4;function de(){let e=0,t=!1,n=!1,s=!1,o=0,l=null;const c=i=>{try{sessionStorage.setItem(O,JSON.stringify({y:i}))}catch{}},f=()=>{if(clearTimeout(e),l===null)return;const i=l;l=null,c(i)},S=()=>{if(t){t=!1;return}n=!0,l=scrollY,clearTimeout(e),e=setTimeout(f,ce)};try{addEventListener("scroll",S,{passive:!0}),addEventListener("pagehide",f)}catch{}const v=()=>{let i;try{i=sessionStorage.getItem(O)}catch{return null}if(i===null)return null;let d;try{d=JSON.parse(i)}catch{d=null}const u=d?.y;if(!(typeof u=="number"&&Number.isFinite(u)&&u>=0)){try{sessionStorage.removeItem(O)}catch{}return null}return u};let b=!1;const m=i=>{try{const d=scrollY;scrollTo({top:i,left:0,behavior:"instant"}),o=i,s=!0,clearTimeout(e),l=null,c(i);const u=scrollY;u!==d&&(t=!0),u!==i&&!b&&(b=!0,addEventListener("load",()=>{try{if(scrollY===u){const h=v();m(h!==null?h:o)}}catch{}},{once:!0}))}catch{}},y=()=>{try{return!!location.hash}catch{return!0}};let g=!1;const E=()=>{try{if(g||innerWidth>ue||innerHeight>fe)return;g=!0;const i=Date.now(),d=()=>{try{removeEventListener("resize",d)}catch{}if(Date.now()-i>pe||n||y())return;const u=v();m(u!==null?u:o)};addEventListener("resize",d)}catch{}};let r=!1,p=!1;return{restore(){if(r||(r=!0,y()))return;const i=v();i!==null&&(m(i),E())},promoted(){if(p||(p=!0,y()))return;const i=v();i!==null?(m(i),E()):s&&m(o)}}}var Ee="modulepreload",Ae=function(e){return"/"+e},Re={},me=function(t,n,s){let o=Promise.resolve();function l(c){const f=new Event("vite:preloadError",{cancelable:!0});if(f.payload=c,window.dispatchEvent(f),!f.defaultPrevented)throw c}return o.then(c=>{for(const f of c||[])f.status==="rejected"&&l(f.reason);return t().catch(l)})};(function(){const e=Object.defineProperty,t=globalThis,n=["RTCPeerConnection","webkitRTCPeerConnection","RTCDataChannel","RTCIceCandidate","RTCSessionDescription","RTCRtpSender","RTCRtpReceiver"];let s=0;for(let o=0;o<n.length;o++){const l=n[o];try{e(t,l,{value:void 0,writable:!1,configurable:!1})}catch{try{delete t[l]}catch{}try{e(t,l,{value:void 0,writable:!1,configurable:!0})}catch{}}typeof t[l]=="function"&&s++}if(s&&window!==top)try{parent.postMessage({__frame_rtc_lockdown_failed:s},"*")}catch{}})();var he=1e4,_e=Object.freeze([...window.__FRAME_PREAMBLE?.origins??["https://claude.ai","https://preview.claude.ai"]]);function F(e){for(const t of _e)if(t.endsWith(":*"))try{const n=new URL(e);if(`${n.protocol}//${n.hostname}:*`===t)return!0}catch{}else if(e===t)return!0;return!1}var M=Object.freeze({...window.__FRAME_PREAMBLE?.capabilities}),j=window.__FRAME_PREAMBLE?.transforms,N=window.__FRAME_PREAMBLE?.comments,I=window.__FRAME_PREAMBLE?.translate,L=/^[\w.-]+\.js$/;function T(e){return me(()=>import("/_runtime/"+e),void 0)}function z(e,t){return{contract:e.contract,changes:new Set(e.changes??[]),flags:new Set(e.flags??[]),capabilities:e.capabilities??{},capBudgets:e.capBudgets??{},transforms:new Map,shellOrigin:t,mount:W,pipe:()=>({wrap:(n,s)=>(...o)=>{try{return s(...o)}catch(l){return Promise.reject(l)}}})}}var P=null,w=null;function q(e,t,n){try{Object.defineProperty(e,t,{value:n,writable:!1,configurable:!1,enumerable:!0})}catch{try{Object.defineProperty(e,t,{value:n,writable:!1,configurable:!0,enumerable:!0})}catch{}}}var B=!1;function ve(e,t){const n=[];for(const s of e.elements){const o=document.querySelector(`[data-id="${s.target}"]`);if(!o){parent.postMessage({__frame_patch_miss:{seq:e.seq}},t);return}if([...Object.keys(s.attrsSet??{}),...s.attrsRemoved??[]].some(l=>!V(l))){parent.postMessage({__frame_patch_miss:{seq:e.seq}},t);return}if(s.text!==void 0&&(!ee(o)||re(o))){parent.postMessage({__frame_patch_miss:{seq:e.seq}},t);return}for(const[l,c]of Object.entries(s.attrsSet??{}))if(!$(o,l)){try{o.setAttribute(l,c)}catch{}H(o,l,c)}for(const l of s.attrsRemoved??[])$(o,l)||(o.removeAttribute(l),H(o,l,null));typeof s.text=="string"&&(o.textContent=s.text),n.push(s.target)}try{document.dispatchEvent(new CustomEvent("claude:edit",{detail:{seq:e.seq,targets:n}}))}catch{}}function H(e,t,n){if(!(e instanceof HTMLInputElement))return;const s=t.toLowerCase();s==="checked"?e.checked=n!==null:s==="value"&&e.type!=="file"&&(e.value=n??"")}function $(e,t){const n=t.toLowerCase(),s=e;return n==="data-id"||(n==="value"||n==="checked")&&(s.__artifactSecret===!0||/^(password|hidden|file)$/.test(s.type??"")||/(^|\s)(cc-|one-time-code|current-password|new-password)/i.test(`${e.getAttribute("autocomplete")??""} ${s.autocomplete??""}`))}function K(e){const t=document.documentElement;e==="light"||e==="dark"?(t.dataset.theme=e,t.style.colorScheme=e,B=!0):B&&(delete t.dataset.theme,t.style.colorScheme="",B=!1)}var R=new Map;function ye(){let e;const t={u:new Promise(n=>{e=n}),r:n=>{t.done=!0,e(n)},done:!1,nulled:!1};return t}var ge=Object.freeze(Object.assign(Object.create(null),{call:Function.prototype.call,apply:Function.prototype.apply,bind:Function.prototype.bind})),W=(e,t)=>{const n=R.get(e);if(!n||n.done){n?.nulled&&w&&parent.postMessage({__frame_cap_telemetry:{kind:"cap-load-error",cap:e}},w);return}const s=typeof t=="function"?Object.setPrototypeOf(t,ge):Object.assign(Object.create(null),t);typeof s.then=="function"&&delete s.then,n.r(Object.freeze(s))},U=Object.getOwnPropertyDescriptor(window,"claude");if(window!==top&&!(U&&U.writable===!1)){const e=j&&L.test(j)?T(j).catch(()=>{}):Promise.resolve(void 0),t=r=>{if(r.type==="auxclick"&&r.button!==1)return;const p=r.target,i=p&&p.closest?p.closest("a[href],area[href]"):null;if(!i)return;const d=i.getAttribute("href");if(!d)return;let u,h;try{u=new URL(d,document.baseURI),h=new URL(document.baseURI).origin}catch{return}if((u.protocol==="http:"||u.protocol==="https:")&&u.origin!==h){r.preventDefault();const _=(i.getAttribute("target")??"").toLowerCase(),C=r.type==="auxclick"||r.metaKey||r.ctrlKey||r.shiftKey||r.altKey||!["","_self","_top","_parent"].includes(_);parent.postMessage({__frame_nav:!0,url:u.href,newTab:C},"*")}};addEventListener("click",t,!0),addEventListener("auxclick",t,!0);const n={},s=r=>{r.isTrusted&&(n.pointer=!0)},o=r=>{r.isTrusted&&(n.click=!0)};addEventListener("pointermove",s,{capture:!0,passive:!0}),addEventListener("click",o,{capture:!0,passive:!0}),e.then(r=>{r?.wireNav&&(r.wireNav(),removeEventListener("click",t,!0),removeEventListener("auxclick",t,!0),removeEventListener("pointermove",s,!0),removeEventListener("click",o,!0),r.wireEngagement?.(n))});let l=null;try{l=de()}catch{}const c=U?.value??{};q(window,"claude",c);for(const r of Object.keys(M)){if(c[r]!==void 0){q(c,r,c[r]);continue}R.set(r,ye())}if(c.use===void 0){const r=p=>{if(typeof p!="string"||!Object.hasOwn(M,p))return Promise.resolve(null);const i=R.get(p);return i?i.u:Promise.resolve(c[p]??null)};try{Object.defineProperty(c,"use",{value:r,writable:!0,configurable:!0,enumerable:!1})}catch{}}let f=null,S=null,v=0;const b=r=>{r.source!==parent||!F(r.origin)||oe(r.data)&&(f=r.data.__frame_init,w=r.origin,removeEventListener("message",b),clearTimeout(v),S?.())};addEventListener("message",b),parent.postMessage({__frame_connect:!0},"*");const m=new Promise(r=>{S=r,v=setTimeout(()=>{removeEventListener("message",b),r()},he)}),y=document.readyState==="loading"?new Promise(r=>document.addEventListener("DOMContentLoaded",()=>r(),{once:!0})):Promise.resolve();y.then(()=>{try{l?.restore()}catch{}});const g={cb:null},E=r=>{if(!(r.source!==parent||!F(r.origin))&&ie(r.data)){try{l?.promoted()}catch{}g.cb?.()}};addEventListener("message",E),m.then(async()=>{if(!f||!w){for(const a of R.values())a.nulled=!0,a.r(null);return}K(f.theme);const r=w;let p=!1,i=!1;addEventListener("message",a=>{if(a.source!==parent||a.origin!==r)return;le(a.data)&&K(a.data.__frame_theme.theme),ae(a.data)&&ve(a.data.__frame_patch,r);const k=a.data?.__fc_mode;k&&typeof k=="object"&&!p&&N&&L.test(N)&&(p=!0,T(N).then(x=>x.install?.(r,k.on===!0)).catch(()=>{}));const A=a.data?.__ft_cmd;A&&typeof A=="object"&&!i&&I&&L.test(I)&&(i=!0,T(I).then(x=>x.install?.(r,A)).catch(()=>{}))});const d=Object.keys(f.capabilities??{}).filter(a=>Object.hasOwn(M,a)).map(a=>[a,M[a]]).filter(a=>typeof a[1]=="string"&&L.test(a[1])),u=await Promise.allSettled(d.map(([,a])=>T(a))),h=await e,_=w;if(h?.buildBoot||parent.postMessage({__frame_cap_telemetry:{kind:"cap-load-error",cap:"_transforms"}},_),h?.buildBoot)try{P=h.buildBoot(f,h.TRANSFORMS??{},{shellOrigin:_,mount:W},a=>parent.postMessage({__frame_cap_telemetry:a},_))}catch{parent.postMessage({__frame_cap_telemetry:{kind:"cap-load-error",cap:"_transforms"}},_),P=z(f,_)}else P=z(f,_);const C=a=>parent.postMessage({__frame_cap_telemetry:{kind:"cap-load-error",cap:a}},_),we=P;u.forEach((a,k)=>{const A=d[k][0];if(a.status!=="fulfilled"){C(A);return}try{a.value?.install?.(we)}catch{C(A)}});for(const a of R.values())a.done||(a.nulled=!0,a.r(null));await y,parent.postMessage({__frame_ready:!0},w),e.then(a=>a?.installSizeReporter?.(_,g))})}})();</script><!-- /frame-runtime --><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<title>Cypher, By Your Own Graph</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=DM+Mono:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+  :root {
+    --paper:      #efeadd;
+    --plate:      #fbf8ef;
+    --plate-2:    #f4efe1;
+    --ink:        #201e18;
+    --body:       #47433a;
+    --prose-2:    #56514a;
+    --muted:      #8b8677;
+    --faint:      #a89f89;
+    --rule-soft:  #ddd5c2;
+    --rule:       #d3cbb8;
+    --rule-firm:  #c3bba6;
+
+    --teal:       #2f7d84;   /* Venue */
+    --purple:     #6a5aa6;   /* Contact */
+    --sienna:     #b5622a;   /* Source */
+    --verdigris:  #4d7a46;   /* Sequence */
+    --teal-wash:      #2f7d8414;
+    --purple-wash:    #6a5aa614;
+    --sienna-wash:    #b5622a14;
+    --verdigris-wash: #4d7a4614;
+
+    --kw:  #8a5a2e;      /* cypher keyword ink, warm, distinct from the four node accents */
+    --str: #4d7a46;
+    --com: #a89f89;
+
+    --mono: 'DM Mono', 'Space Mono', ui-monospace, SFMono-Regular, monospace;
+    --disp: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+    --radius: 2px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--body);
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--teal); color: var(--paper); }
+
+  a { color: var(--teal); text-decoration-color: var(--rule-firm); text-underline-offset: 3px; }
+  a:hover, a:focus-visible { text-decoration-color: var(--teal); }
+  a:focus-visible, button:focus-visible, .term:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+  h1, h2, h3 { font-family: var(--disp); color: var(--ink); text-wrap: balance; margin: 0; }
+  p { margin: 0 0 1em; max-width: 62ch; }
+  code { font-family: var(--mono); }
+
+  /* ---------- frontispiece ---------- */
+  .frontispiece {
+    max-width: 880px; margin: 0 auto;
+    padding: 72px 26px 56px;
+  }
+  .kicker {
+    font-size: 11px; letter-spacing: .3em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 22px;
+  }
+  .frontispiece h1 {
+    font-size: clamp(34px, 5vw, 52px); font-weight: 700; letter-spacing: -.01em;
+    line-height: 1.08; margin-bottom: 18px;
+  }
+  .frontispiece h1 em { font-style: normal; color: var(--teal); }
+  .lede { font-size: 17px; color: var(--prose-2); max-width: 58ch; }
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 30px;
+    font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  }
+  .meta-row b { color: var(--ink); font-weight: 600; }
+
+  /* schedule budget */
+  .budget {
+    margin-top: 40px; border: 1px solid var(--rule-firm); border-radius: var(--radius);
+    background: var(--plate); overflow: hidden;
+  }
+  .budget-row {
+    display: grid; grid-template-columns: 90px 1fr 70px; gap: 14px; align-items: baseline;
+    padding: 13px 18px; border-top: 1px solid var(--rule-soft);
+  }
+  .budget-row:first-child { border-top: none; }
+  .budget-clock { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .budget-label { color: var(--body); }
+  .budget-label small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .budget-min { text-align: right; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+  /* schema legend */
+  .legend { margin-top: 40px; }
+  .legend-title { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint); margin-bottom: 14px; }
+  .kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .kind {
+    border: 1px solid var(--rule-firm); border-radius: var(--radius); padding: 12px 14px;
+    background: var(--plate);
+  }
+  .kind-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  .kind-name { font-family: var(--disp); font-weight: 600; color: var(--ink); font-size: 14.5px; }
+  .kind-desc { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  .rels { margin-top: 14px; font-size: 13px; color: var(--prose-2); }
+  .rels code { background: var(--plate-2); padding: 1px 6px; border-radius: var(--radius); border: 1px solid var(--rule); }
+
+  /* toc */
+  .toc { margin-top: 46px; border-top: 1px solid var(--rule-soft); padding-top: 22px; }
+  .toc-title { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint); margin-bottom: 12px; }
+  .toc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .toc-list a {
+    display: flex; gap: 12px; align-items: baseline; color: var(--body); text-decoration: none;
+    font-size: 13.5px; padding: 3px 0;
+  }
+  .toc-list a:hover { color: var(--teal); }
+  .toc-no { font-variant-numeric: tabular-nums; color: var(--faint); width: 20px; flex-shrink: 0; }
+
+  /* ---------- plates ---------- */
+  .plate {
+    max-width: 880px; margin: 0 auto; padding: 58px 26px;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .plate-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px; }
+  .plate-no { font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+  .plate-title { font-size: 25px; font-weight: 600; letter-spacing: -.01em; }
+  .plate-sub { color: var(--muted); font-size: 13px; margin-top: -14px; margin-bottom: 22px; font-style: italic; }
+
+  .plate p { color: var(--body); }
+  .plate strong { color: var(--ink); font-weight: 600; }
+
+  /* code plates */
+  pre.cypher {
+    background: var(--plate); border: 1px solid var(--rule-firm); border-radius: var(--radius);
+    padding: 16px 18px; overflow-x: auto; margin: 18px 0;
+    font-size: 13.5px; line-height: 1.7; color: var(--ink);
+  }
+  pre.cypher code { white-space: pre; }
+  .kw  { color: var(--kw); font-weight: 500; }
+  .lbl-venue    { color: var(--teal);      font-weight: 500; }
+  .lbl-contact  { color: var(--purple);    font-weight: 500; }
+  .lbl-source   { color: var(--sienna);    font-weight: 500; }
+  .lbl-sequence { color: var(--verdigris); font-weight: 500; }
+  .str { color: var(--str); }
+  .com { color: var(--com); font-style: italic; }
+  .param { color: var(--sienna); }
+
+  .gloss {
+    display: flex; gap: 10px; align-items: flex-start; margin: 14px 0;
+    padding: 12px 14px; background: var(--plate-2); border-left: 2px solid var(--rule-firm);
+    border-radius: 0 var(--radius) var(--radius) 0; font-size: 13px; color: var(--prose-2);
+  }
+  .gloss b { color: var(--ink); }
+  .gloss.try { border-left-color: var(--teal); }
+  .gloss.gotcha { border-left-color: var(--sienna); }
+  .gloss.grounded { border-left-color: var(--verdigris); }
+  .gloss-tag {
+    flex-shrink: 0; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--faint); padding-top: 2px; width: 62px;
+  }
+
+  .figcaption { font-style: italic; font-size: 12.5px; color: var(--muted); margin-top: -8px; margin-bottom: 18px; }
+
+  /* line-gloss table for the final full read */
+  .lgloss { display: grid; grid-template-columns: 1fr; gap: 0; margin: 18px 0; border: 1px solid var(--rule-firm); border-radius: var(--radius); overflow: hidden; }
+  .lgloss-row { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(0,1fr); border-top: 1px solid var(--rule-soft); }
+  .lgloss-row:first-child { border-top: none; }
+  .lgloss-code { padding: 10px 14px; background: var(--plate); font-size: 12.5px; color: var(--ink); overflow-x: auto; white-space: pre; }
+  .lgloss-note { padding: 10px 14px; background: var(--paper); font-size: 12.5px; color: var(--prose-2); border-left: 1px solid var(--rule-soft); }
+
+  /* dotted term */
+  .term { border-bottom: 1px dotted var(--faint); cursor: help; }
+  .term:hover { border-bottom-color: var(--teal); }
+
+  table.ref { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  table.ref th { text-align: left; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); font-weight: 500; padding: 6px 12px 8px; border-bottom: 1px solid var(--rule-firm); }
+  table.ref td { padding: 8px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  table.ref code { background: var(--plate-2); padding: 1px 5px; border-radius: var(--radius); }
+
+  .exercise {
+    margin-top: 20px; border: 1px solid var(--rule-firm); border-radius: var(--radius);
+    background: var(--plate); padding: 16px 18px;
+  }
+  .exercise-label { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--teal); margin-bottom: 8px; font-weight: 600; }
+  .exercise p { margin-bottom: 10px; font-size: 13.5px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; letter-spacing: .04em; }
+  details summary:hover { color: var(--teal); }
+  details[open] summary { color: var(--ink); margin-bottom: 8px; }
+
+  /* closing */
+  .closing { max-width: 880px; margin: 0 auto; padding: 58px 26px 100px; border-top: 1px solid var(--rule-soft); }
+  .glossary { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap: 14px 26px; margin-top: 20px; }
+  .gterm { font-family: var(--disp); font-weight: 600; color: var(--ink); font-size: 14px; }
+  .gdef { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+
+  .practice-list { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 10px; }
+  .practice-list li { padding-left: 22px; position: relative; font-size: 13.5px; color: var(--prose-2); }
+  .practice-list li::before { content: '→'; position: absolute; left: 0; color: var(--teal); }
+
+  @media (max-width: 560px) {
+    .lgloss-row { grid-template-columns: 1fr; }
+    .lgloss-note { border-left: none; border-top: 1px solid var(--rule-soft); }
+    .budget-row { grid-template-columns: 70px 1fr; }
+    .budget-min { grid-column: 2; text-align: left; margin-top: -4px; }
+  }
+</style>
+
+<article class="frontispiece">
+  <div class="kicker">A working session, not a reference manual</div>
+  <h1>Cypher,<br>taught by <em>your own graph</em>.</h1>
+  <p class="lede">
+    You already have four Cypher queries running in production — they wrote your Contacts,
+    Venues, Sources and Sequences into Aura. This session doesn't teach Cypher with actors
+    and movies. It teaches Cypher by putting your own <code>Q_IMPORT</code> query back in
+    front of you, piece by piece, until you can read it cold — and write the next one yourself.
+  </p>
+
+  <div class="meta-row">
+    <span><b>~2 hrs</b> hands-on</span>
+    <span><b>12 plates</b></span>
+    <span><b>every example</b> runs against Orbit's real schema</span>
+  </div>
+
+  <div class="budget">
+    <div class="budget-row"><span class="budget-clock">0:00</span><span class="budget-label">Plates 1–4 — nodes, relationships, filtering, counting<small>the four moves you'll use in almost every query you ever write</small></span><span class="budget-min">40 min</span></div>
+    <div class="budget-row"><span class="budget-clock">0:40</span><span class="budget-label">Plates 5–9 — the idioms your own code already leans on<small>OPTIONAL MATCH, MERGE, WITH, UNWIND, FOREACH — straight from linkedinImport.ts</small></span><span class="budget-min">55 min</span></div>
+    <div class="budget-row"><span class="budget-clock">1:35</span><span class="budget-label">Plates 10–11 — paths, then reading the whole query cold<small>shortestPath(), and the full Q_IMPORT annotated line by line</small></span><span class="budget-min">25 min</span></div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-title">The schema you'll be writing against</div>
+    <div class="kinds">
+      <div class="kind"><span class="kind-dot" style="background:var(--teal)"></span><span class="kind-name">Venue</span><div class="kind-desc">a business — <code>venue_id</code>, <code>name</code>, <code>district</code>, <code>vertical_id</code></div></div>
+      <div class="kind"><span class="kind-dot" style="background:var(--purple)"></span><span class="kind-name">Contact</span><div class="kind-desc">a person at a venue — <code>contact_id</code>, <code>name</code>, <code>verified</code></div></div>
+      <div class="kind"><span class="kind-dot" style="background:var(--sienna)"></span><span class="kind-name">Source</span><div class="kind-desc">who verified a contact — <code>name</code></div></div>
+      <div class="kind"><span class="kind-dot" style="background:var(--verdigris)"></span><span class="kind-name">Sequence</span><div class="kind-desc">an outreach cadence — <code>sequence_id</code>, <code>status</code></div></div>
+    </div>
+    <div class="rels">
+      Wired by four relationships: <code>(Contact)-[:WORKS_AT]→(Venue)</code>,
+      <code>(Contact)-[:VERIFIED_BY]→(Source)</code>, <code>(Contact)-[:ENROLLED_IN]→(Sequence)</code>,
+      <code>(Sequence)-[:TARGETS]→(Venue)</code>.
+    </div>
+  </div>
+
+  <div class="toc">
+    <div class="toc-title">Twelve plates</div>
+    <ol class="toc-list">
+      <li><a href="#p0"><span class="toc-no">00</span> Reading the room — what Cypher even is</a></li>
+      <li><a href="#p1"><span class="toc-no">01</span> Nodes, labels, properties — MATCH and RETURN</a></li>
+      <li><a href="#p2"><span class="toc-no">02</span> Relationships and patterns — the core idiom</a></li>
+      <li><a href="#p3"><span class="toc-no">03</span> WHERE — filtering the pattern</a></li>
+      <li><a href="#p4"><span class="toc-no">04</span> Aggregation — count, collect, and grouping-by-omission</a></li>
+      <li><a href="#p5"><span class="toc-no">05</span> OPTIONAL MATCH — the graph's left join, and its trap</a></li>
+      <li><a href="#p6"><span class="toc-no">06</span> MERGE — writing that doesn't duplicate itself</a></li>
+      <li><a href="#p7"><span class="toc-no">07</span> WITH — chaining stages, losing scope</a></li>
+      <li><a href="#p8"><span class="toc-no">08</span> UNWIND — a parameter list becomes rows</a></li>
+      <li><a href="#p9"><span class="toc-no">09</span> FOREACH — Cypher's if-statement for writes</a></li>
+      <li><a href="#p10"><span class="toc-no">10</span> Paths — shortestPath() the native way</a></li>
+      <li><a href="#p11"><span class="toc-no">11</span> Reading Q_IMPORT cold</a></li>
+    </ol>
+  </div>
+</article>
+
+<!-- ============================================================ -->
+<section class="plate" id="p0">
+  <div class="plate-head"><span class="plate-no">Plate 00</span><h2 class="plate-title">What Cypher even is</h2></div>
+
+  <p>
+    SQL describes tables and asks you to imagine the joins. Cypher does the opposite: you draw
+    the shape you're looking for, in the query itself, using ASCII art. Parentheses are nodes.
+    Square brackets are relationships. Arrows show direction. That's most of the syntax.
+  </p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-contact">c:Contact</span>)-[:WORKS_AT]-&gt;(<span class="lbl-venue">v:Venue</span>)
+<span class="kw">RETURN</span> c.name, v.name</code></pre>
+  <p class="figcaption">Read it as a sentence: "a Contact, that WORKS_AT a Venue."</p>
+
+  <p>
+    That's the whole mental model. Every query you'll write is a variation on: draw the pattern
+    you want, optionally narrow it with <code>WHERE</code>, then say what to <code>RETURN</code>
+    — or, for writes, what to <code>MERGE</code>. There's no separate "join" keyword because the
+    pattern <em>is</em> the join.
+  </p>
+
+  <div class="gloss try">
+    <span class="gloss-tag">try it</span>
+    <span>Every code block in this session is a real, runnable query against your schema.
+    Open your app → Graph → click a node → <b>Open in Neo4j Browser ↗</b> in the schema panel,
+    and paste as you go.</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p1">
+  <div class="plate-head"><span class="plate-no">Plate 01</span><h2 class="plate-title">Nodes, labels, properties</h2></div>
+  <p class="plate-sub">MATCH · RETURN · LIMIT</p>
+
+  <p>
+    <code>(v:Venue)</code> means: bind a variable named <code>v</code>, to any node carrying the
+    label <code>Venue</code>. The label is the node's <span class="term" title="Cypher labels are unordered — a node can carry more than one, though every node in Orbit's schema carries exactly one.">kind</span>.
+    Properties live in <code>{ }</code> when you're matching by them, or after a dot when you're reading them.
+  </p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-venue">v:Venue</span>)
+<span class="kw">RETURN</span> v.name, v.district
+<span class="kw">LIMIT</span> 5</code></pre>
+
+  <p>This is the read side of exactly what your importer writes:</p>
+
+  <pre class="cypher"><code><span class="kw">MERGE</span> (<span class="lbl-venue">v:Venue</span> {venue_id: r.venueId})
+  <span class="kw">SET</span> v.name = r.name, v.district = r.district, v.vertical_id = r.verticalId</code></pre>
+  <p class="figcaption">syncToNeo4j.ts, Q_VENUES — the node this plate's MATCH is reading back.</p>
+
+  <div class="exercise">
+    <div class="exercise-label">exercise</div>
+    <p>Return the name of every Trades venue that has no website on file.</p>
+    <details><summary>show query</summary>
+<pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-venue">v:Venue</span>)
+<span class="kw">WHERE</span> v.category = <span class="str">'Trades'</span> <span class="kw">AND</span> (v.website <span class="kw">IS NULL</span> <span class="kw">OR</span> v.website = <span class="str">''</span>)
+<span class="kw">RETURN</span> v.name</code></pre>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p2">
+  <div class="plate-head"><span class="plate-no">Plate 02</span><h2 class="plate-title">Relationships and patterns</h2></div>
+  <p class="plate-sub">-[:REL]→ · direction · multi-hop</p>
+
+  <p>
+    A relationship pattern chains nodes together. Direction is real and matters — Orbit's
+    <code>WORKS_AT</code> always points <code>Contact → Venue</code>, never the other way.
+    Get the arrow backwards and you'll get an empty result, not an error, which is the
+    single most common first-week Cypher bug.
+  </p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-contact">c:Contact</span>)-[:VERIFIED_BY]-&gt;(<span class="lbl-source">s:Source</span> {name: <span class="str">'linkedin-import'</span>})
+<span class="kw">RETURN</span> c.name, c.title
+<span class="kw">LIMIT</span> 10</code></pre>
+
+  <p>Chain more than one hop by just continuing the pattern — this is a Contact, the Venue they work at, and the Sequence targeting that Venue, all in one line:</p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-contact">c:Contact</span>)-[:WORKS_AT]-&gt;(<span class="lbl-venue">v:Venue</span>)&lt;-[:TARGETS]-(<span class="lbl-sequence">s:Sequence</span>)
+<span class="kw">RETURN</span> c.name, v.name, s.name</code></pre>
+  <p class="figcaption">Two relationships, one pattern — no explicit join anywhere.</p>
+
+  <div class="gloss">
+    <span class="gloss-tag">note</span>
+    <span>Drop the arrowhead — <code>-[:WORKS_AT]-</code> with no <code>&gt;</code> — to match the
+    relationship in either direction. Useful when you don't remember (or don't care) which way it points.</span>
+  </div>
+
+  <div class="exercise">
+    <div class="exercise-label">exercise</div>
+    <p>List every Contact enrolled in a Sequence, with that sequence's status.</p>
+    <details><summary>show query</summary>
+<pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-contact">c:Contact</span>)-[:ENROLLED_IN]-&gt;(<span class="lbl-sequence">s:Sequence</span>)
+<span class="kw">RETURN</span> c.name, s.status</code></pre>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p3">
+  <div class="plate-head"><span class="plate-no">Plate 03</span><h2 class="plate-title">WHERE — filtering the pattern</h2></div>
+  <p class="plate-sub">toLower() · CONTAINS · NOT EXISTS</p>
+
+  <p>
+    <code>WHERE</code> narrows a pattern the same way it would narrow a SQL row — the difference
+    is it can filter on the <em>shape</em> of the graph, not just property values. Your importer
+    uses this constantly for case-insensitive matching, since business names arrive with
+    inconsistent capitalization:
+  </p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-venue">v:Venue</span>)
+<span class="kw">WHERE</span> toLower(v.name) = toLower(<span class="str">'blitz elektrotechnik'</span>)
+<span class="kw">RETURN</span> v</code></pre>
+
+  <p>The pattern-shape filter — one of the presets in your own Ask panel, "Companies with no verified contact" — reads:</p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-venue">v:Venue</span>)
+<span class="kw">WHERE NOT EXISTS</span> {
+  <span class="kw">MATCH</span> (<span class="lbl-contact">c:Contact</span>)-[:WORKS_AT]-&gt;(v) <span class="kw">WHERE</span> c.verified
+}
+<span class="kw">RETURN</span> v.name</code></pre>
+  <p class="figcaption">"No verified contact" isn't a property on Venue — it's an absence in the graph's shape.</p>
+
+  <div class="exercise">
+    <div class="exercise-label">exercise</div>
+    <p>Find every Contact whose title contains the word "electric" (any case).</p>
+    <details><summary>show query</summary>
+<pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-contact">c:Contact</span>)
+<span class="kw">WHERE</span> toLower(c.title) <span class="kw">CONTAINS</span> <span class="str">'electric'</span>
+<span class="kw">RETURN</span> c.name, c.title</code></pre>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p4">
+  <div class="plate-head"><span class="plate-no">Plate 04</span><h2 class="plate-title">Aggregation</h2></div>
+  <p class="plate-sub">count() · collect() · grouping by omission</p>
+
+  <p>
+    Cypher has no <code>GROUP BY</code>. Instead: <strong>any column you RETURN that isn't
+    wrapped in an aggregate function automatically becomes the group key.</strong> This trips
+    up everyone coming from SQL exactly once, and then never again.
+  </p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-venue">v:Venue</span>)
+<span class="kw">RETURN</span> v.district, count(v) <span class="kw">AS</span> n
+<span class="kw">ORDER BY</span> n <span class="kw">DESC</span></code></pre>
+  <p class="figcaption">"Venue count by district" — v.district isn't aggregated, so it's the group.</p>
+
+  <p><code>collect()</code> is <code>count()</code>'s sibling — instead of a number, gather the actual matches into a list:</p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-contact">c:Contact</span>)-[:VERIFIED_BY]-&gt;(<span class="lbl-source">s:Source</span>)
+<span class="kw">RETURN</span> s.name, collect(c.name) <span class="kw">AS</span> verifiedContacts</code></pre>
+
+  <div class="exercise">
+    <div class="exercise-label">exercise</div>
+    <p>Which Venues have the most WORKS_AT contacts — "most-connected companies," ranked?</p>
+    <details><summary>show query</summary>
+<pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-contact">c:Contact</span>)-[:WORKS_AT]-&gt;(<span class="lbl-venue">v:Venue</span>)
+<span class="kw">RETURN</span> v.name, count(c) <span class="kw">AS</span> contacts
+<span class="kw">ORDER BY</span> contacts <span class="kw">DESC</span>
+<span class="kw">LIMIT</span> 10</code></pre>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p5">
+  <div class="plate-head"><span class="plate-no">Plate 05</span><h2 class="plate-title">OPTIONAL MATCH</h2></div>
+  <p class="plate-sub">the graph's left join — and the trap inside it</p>
+
+  <p>
+    Plain <code>MATCH</code> is an inner join: no match, no row. <code>OPTIONAL MATCH</code> keeps
+    the row anyway, with every unmatched variable bound to <code>null</code>. This is exactly how
+    your importer links a LinkedIn contact to an existing Venue <em>without ever creating one</em>:
+  </p>
+
+  <pre class="cypher"><code><span class="kw">OPTIONAL MATCH</span> (<span class="lbl-venue">v:Venue</span>)
+  <span class="kw">WHERE</span> r.company <span class="kw">IS NOT NULL</span>
+    <span class="kw">AND</span> toLower(v.name) = toLower(r.company)
+    <span class="kw">AND</span> v.vertical_id = r.verticalId
+<span class="kw">FOREACH</span> (_ <span class="kw">IN CASE WHEN</span> v <span class="kw">IS NOT NULL</span> <span class="kw">THEN</span> [1] <span class="kw">ELSE</span> [] <span class="kw">END</span> |
+  <span class="kw">MERGE</span> (c)-[:WORKS_AT]-&gt;(v))</code></pre>
+  <p class="figcaption">linkedinImport.ts, Q_IMPORT — OPTIONAL MATCH can't create a node, so this is structurally safe, not just careful.</p>
+
+  <div class="gloss gotcha">
+    <span class="gloss-tag">the trap</span>
+    <span><code>OPTIONAL MATCH</code> can also return <strong>more than one row</strong> per input
+    row — if two Venues happen to share a name, you get two output rows, and anything downstream
+    (a MERGE, a count) silently runs twice. This is the exact bug class /code-review caught in
+    this session's own diff, twice: once for Venue names, once for Contact+Venue name-fallback
+    matching. The fix both times was the same — narrow the WHERE until only one match is possible,
+    here by adding <code>vertical_id</code> to the condition.</span>
+  </div>
+
+  <div class="exercise">
+    <div class="exercise-label">exercise</div>
+    <p>Return every Venue, and the name of its Sequence if it has one — <code>null</code> if not.</p>
+    <details><summary>show query</summary>
+<pre class="cypher"><code><span class="kw">MATCH</span> (<span class="lbl-venue">v:Venue</span>)
+<span class="kw">OPTIONAL MATCH</span> (<span class="lbl-sequence">s:Sequence</span>)-[:TARGETS]-&gt;(v)
+<span class="kw">RETURN</span> v.name, s.name</code></pre>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p6">
+  <div class="plate-head"><span class="plate-no">Plate 06</span><h2 class="plate-title">MERGE</h2></div>
+  <p class="plate-sub">writing that doesn't duplicate itself</p>
+
+  <p>
+    <code>CREATE</code> always makes a new node — run the same import twice and you get two
+    copies of everything. <code>MERGE</code> finds a node matching the given pattern, and only
+    creates one if nothing matched. Your codebase's own comment says it best:
+  </p>
+
+  <pre class="cypher"><code><span class="com">// MERGE by stable keys so re-syncing the same lead is idempotent.</span>
+<span class="kw">MERGE</span> (<span class="lbl-contact">c:Contact</span> {contact_id: cid})
+  <span class="kw">SET</span> c.name = r.name, c.title = r.title, c.vertical_id = r.verticalId</code></pre>
+
+  <div class="gloss gotcha">
+    <span class="gloss-tag">the footgun</span>
+    <span><code>MERGE</code> matches on <strong>every property inside the braces</strong>. Put two
+    properties in the merge pattern — <code>MERGE (v:Venue {name: x, district: y})</code> — and
+    you've made <em>the pair</em> the identity, not <code>name</code> alone. That's usually not
+    what you meant. Keep the merge pattern to a single stable key (an id), and set everything
+    else afterward with <code>SET</code> — exactly the shape of every query in this codebase.</span>
+  </div>
+
+  <div class="exercise">
+    <div class="exercise-label">exercise</div>
+    <p>Write a MERGE that upserts a Source node by name, and stamps a <code>last_seen</code> property on every run.</p>
+    <details><summary>show query</summary>
+<pre class="cypher"><code><span class="kw">MERGE</span> (<span class="lbl-source">s:Source</span> {name: <span class="str">'linkedin-import'</span>})
+  <span class="kw">SET</span> s.last_seen = datetime()</code></pre>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p7">
+  <div class="plate-head"><span class="plate-no">Plate 07</span><h2 class="plate-title">WITH</h2></div>
+  <p class="plate-sub">chaining stages, and where your variables go to die</p>
+
+  <p>
+    <code>WITH</code> is Cypher's pipe: it closes one stage of the query and opens the next.
+    The critical rule — <strong>anything not named in the WITH clause is dropped.</strong>
+    That's the entire explanation for "why did my variable disappear," which is the second
+    most common beginner trap, right after the arrow direction from Plate 02.
+  </p>
+
+  <p>Your import query is four stages long, and each <code>WITH</code> is a deliberate handoff:</p>
+
+  <pre class="cypher"><code><span class="kw">UNWIND</span> $rows <span class="kw">AS</span> r
+<span class="kw">OPTIONAL MATCH</span> (existing:Contact)-[:WORKS_AT]-&gt;(v0:Venue) <span class="kw">WHERE</span> …
+<span class="kw">WITH</span> r, coalesce(existing.contact_id, r.contactId) <span class="kw">AS</span> cid   <span class="com">// existing, v0 dropped here</span>
+<span class="kw">MERGE</span> (<span class="lbl-contact">c:Contact</span> {contact_id: cid}) <span class="kw">SET</span> …
+<span class="kw">WITH</span> c, r                                                     <span class="com">// cid dropped here</span>
+<span class="kw">OPTIONAL MATCH</span> (<span class="lbl-venue">v:Venue</span>) <span class="kw">WHERE</span> …
+<span class="kw">FOREACH</span> (… <span class="kw">MERGE</span> (c)-[:WORKS_AT]-&gt;(v))
+<span class="kw">WITH</span> c, r, v                                                  <span class="com">// carried forward for Source linking</span>
+<span class="kw">MERGE</span> (<span class="lbl-source">src:Source</span> {name: <span class="str">'linkedin-import'</span>}) <span class="kw">SET</span> …
+<span class="kw">MERGE</span> (c)-[:VERIFIED_BY]-&gt;(src)</code></pre>
+  <p class="figcaption">Every WITH is a name-your-carry-ons moment — only what's listed survives to the next stage.</p>
+
+  <div class="gloss">
+    <span class="gloss-tag">rule of thumb</span>
+    <span>When a variable you need "vanishes," it's almost never a bug in Cypher — it's a
+    <code>WITH</code> upstream that didn't name it. Scroll up.</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p8">
+  <div class="plate-head"><span class="plate-no">Plate 08</span><h2 class="plate-title">UNWIND</h2></div>
+  <p class="plate-sub">a parameter list becomes rows</p>
+
+  <p>
+    Your driver code hands the query a JS array — one object per lead, per CSV row, per contact.
+    <code>UNWIND</code> is what turns that single list parameter into one row per element, so the
+    rest of the query can treat it exactly like a <code>MATCH</code>ed row.
+  </p>
+
+  <pre class="cypher"><code><span class="kw">UNWIND</span> <span class="param">$rows</span> <span class="kw">AS</span> r
+<span class="kw">MERGE</span> (<span class="lbl-venue">v:Venue</span> {venue_id: r.venueId})
+  <span class="kw">SET</span> v.name = r.name</code></pre>
+  <p class="figcaption">The very first line of every write query you've shipped this session — this is how a 16-row CSV becomes 16 MERGEs in one round trip.</p>
+
+  <div class="gloss grounded">
+    <span class="gloss-tag">why it matters</span>
+    <span>Without <code>UNWIND</code>, importing N rows means N separate queries — N network
+    round trips to Aura. With it, one query call, one transaction, however many rows.
+    That's the entire reason <code>linkedinImport.ts</code> builds a JS array first and hands
+    it to Cypher as a single <code>$rows</code> parameter, instead of looping and calling
+    <code>tx.run()</code> per contact.</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p9">
+  <div class="plate-head"><span class="plate-no">Plate 09</span><h2 class="plate-title">FOREACH</h2></div>
+  <p class="plate-sub">Cypher's if-statement, for writes only</p>
+
+  <p>
+    Cypher has no <code>IF</code> for side effects. The idiom is <code>FOREACH</code> over a list
+    that's either empty or has one element — a zero-or-one-element list stands in for a boolean.
+    Read this exactly once, slowly, and it stops being strange:
+  </p>
+
+  <pre class="cypher"><code><span class="kw">FOREACH</span> (_ <span class="kw">IN</span>
+  <span class="kw">CASE WHEN</span> v <span class="kw">IS NOT NULL</span> <span class="kw">THEN</span> [1] <span class="kw">ELSE</span> [] <span class="kw">END</span>
+  | <span class="kw">MERGE</span> (c)-[:WORKS_AT]-&gt;(v)
+)</code></pre>
+
+  <table class="ref">
+    <tr><th>if v matched</th><td><code>CASE</code> returns <code>[1]</code> — a one-element list — so <code>FOREACH</code> runs its body <b>once</b>.</td></tr>
+    <tr><th>if v didn't match</th><td><code>CASE</code> returns <code>[]</code> — empty — so <code>FOREACH</code> runs its body <b>zero times</b>.</td></tr>
+    <tr><th>the <code>_</code></th><td>just a throwaway loop variable — the body never reads it, only the list's length matters.</td></tr>
+  </table>
+
+  <p>Plain English: "if a Venue matched, link to it; otherwise, do nothing." That's the whole line.</p>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p10">
+  <div class="plate-head"><span class="plate-no">Plate 10</span><h2 class="plate-title">Paths</h2></div>
+  <p class="plate-sub">shortestPath() — the native way</p>
+
+  <p>
+    Your graph view's "find path between two selected nodes" runs client-side today — plain JS,
+    breadth-first search over whatever's already loaded in the browser
+    (<code>findShortestPath</code> in <code>ask.ts</code>). Cypher can do the same search
+    natively, inside the database, which matters once the graph is too big to hold in memory
+    on the client:
+  </p>
+
+  <pre class="cypher"><code><span class="kw">MATCH</span> p = shortestPath(
+  (a:Venue {venue_id: <span class="param">$fromId</span>})-[*..6]-(b:Venue {venue_id: <span class="param">$toId</span>})
+)
+<span class="kw">RETURN</span> p</code></pre>
+  <p class="figcaption"><code>[*..6]</code> means "any relationship type, up to 6 hops" — cap it, or a disconnected graph makes this search expensive.</p>
+
+  <div class="gloss">
+    <span class="gloss-tag">worth knowing</span>
+    <span>Not something to migrate today — the client-side version works fine at Orbit's current
+    scale, and it means path queries don't need a round trip to Aura for something already on
+    screen. File this under "the database-native way to do it," for the day the graph outgrows the browser tab.</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="plate" id="p11">
+  <div class="plate-head"><span class="plate-no">Plate 11</span><h2 class="plate-title">Reading Q_IMPORT cold</h2></div>
+  <p class="plate-sub">everything above, in the one query you actually shipped</p>
+
+  <p>This is the full query behind <code>linkedinImport.ts</code>, as it stands after this
+  session's fixes. Every line below maps to a plate you've just read.</p>
+
+  <div class="lgloss">
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">UNWIND</span> $rows <span class="kw">AS</span> r</div>
+      <div class="lgloss-note">Plate 08 — one row per CSV line.</div>
+    </div>
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">OPTIONAL MATCH</span> (existing:Contact)-[:WORKS_AT]-&gt;(v0:Venue)
+  <span class="kw">WHERE</span> r.matchByName <span class="kw">AND</span> r.company <span class="kw">IS NOT NULL</span>
+    <span class="kw">AND</span> toLower(existing.name)=toLower(r.name)
+    <span class="kw">AND</span> toLower(v0.name)=toLower(r.company)
+    <span class="kw">AND</span> v0.vertical_id = r.verticalId
+    <span class="kw">AND</span> existing.vertical_id = r.verticalId</div>
+      <div class="lgloss-note">Plates 03 &amp; 05 — best-effort dedup for rows with no LinkedIn URL. The two <code>vertical_id</code> checks are this session's fix: without them, a same-named contact in a different vertical could get silently reused.</div>
+    </div>
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">WITH</span> r, coalesce(existing.contact_id, r.contactId) <span class="kw">AS</span> cid</div>
+      <div class="lgloss-note">Plate 07 — pick the resolved id, drop everything else.</div>
+    </div>
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">MERGE</span> (c:Contact {contact_id: cid})
+  <span class="kw">SET</span> c.name=r.name, c.title=r.title, …, c.vertical_id=r.verticalId</div>
+      <div class="lgloss-note">Plate 06 — find-or-create by the one stable key. Safe to always <code>SET vertical_id</code> now, since the match above guarantees it already agrees.</div>
+    </div>
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">WITH</span> c, r</div>
+      <div class="lgloss-note">Plate 07 again — cid's job is done, drop it.</div>
+    </div>
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">OPTIONAL MATCH</span> (v:Venue)
+  <span class="kw">WHERE</span> r.company <span class="kw">IS NOT NULL</span>
+    <span class="kw">AND</span> toLower(v.name)=toLower(r.company)
+    <span class="kw">AND</span> v.vertical_id = r.verticalId</div>
+      <div class="lgloss-note">Plate 05 — link if a Venue exists, never create one. Vertical-scoped, same fix as above.</div>
+    </div>
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">FOREACH</span> (_ <span class="kw">IN CASE WHEN</span> v <span class="kw">IS NOT NULL</span> <span class="kw">THEN</span> [1] <span class="kw">ELSE</span> [] <span class="kw">END</span>
+  | <span class="kw">MERGE</span> (c)-[:WORKS_AT]-&gt;(v))</div>
+      <div class="lgloss-note">Plate 09 — the conditional write.</div>
+    </div>
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">WITH</span> c, r, v
+<span class="kw">MERGE</span> (src:Source {name: <span class="str">'linkedin-import'</span>})
+  <span class="kw">SET</span> src.imported_at = r.importedAt
+<span class="kw">MERGE</span> (c)-[:VERIFIED_BY]-&gt;(src)</div>
+      <div class="lgloss-note">Plates 02, 06, 07 — provenance, same MERGE-by-key pattern as everything else.</div>
+    </div>
+    <div class="lgloss-row">
+      <div class="lgloss-code"><span class="kw">RETURN</span> count(*) <span class="kw">AS</span> n, count(v) <span class="kw">AS</span> linked</div>
+      <div class="lgloss-note">Plate 04 — aggregating the whole UNWIND back down to a summary.</div>
+    </div>
+  </div>
+
+  <p>
+    That's the entire query — nine plates, one file. Nothing in <code>linkedinImport.ts</code>
+    uses a single Cypher feature that isn't above.
+  </p>
+</section>
+
+<!-- ============================================================ -->
+<section class="closing">
+  <h2 class="plate-title" style="margin-bottom:6px">Glossary, in the margin</h2>
+  <p class="figcaption" style="margin-bottom:0">the eleven words that cover almost everything you'll write</p>
+
+  <div class="glossary">
+    <div><div class="gterm">Label</div><div class="gdef">a node's kind — <code>:Venue</code>, <code>:Contact</code>. A node can carry several; Orbit's never do.</div></div>
+    <div><div class="gterm">Pattern</div><div class="gdef">the ASCII drawing of nodes + relationships that a MATCH looks for.</div></div>
+    <div><div class="gterm">MATCH</div><div class="gdef">inner join — no match, no row.</div></div>
+    <div><div class="gterm">OPTIONAL MATCH</div><div class="gdef">left join — no match, row survives with nulls. Can also return &gt;1 row per input.</div></div>
+    <div><div class="gterm">WHERE</div><div class="gdef">filters a pattern, by property or by shape (<code>NOT EXISTS { … }</code>).</div></div>
+    <div><div class="gterm">RETURN</div><div class="gdef">what the query hands back. Non-aggregated columns become the group key.</div></div>
+    <div><div class="gterm">MERGE</div><div class="gdef">find by the given pattern, create only if nothing matched. Idempotent by design.</div></div>
+    <div><div class="gterm">SET</div><div class="gdef">write properties onto an already-matched or -merged node.</div></div>
+    <div><div class="gterm">WITH</div><div class="gdef">closes a stage; only named variables carry forward.</div></div>
+    <div><div class="gterm">UNWIND</div><div class="gdef">list parameter → one row per element.</div></div>
+    <div><div class="gterm">FOREACH</div><div class="gdef">run a write 0 or 1 times, via a <code>CASE … [1] … []</code> list trick.</div></div>
+  </div>
+
+  <h2 class="plate-title" style="margin-top:46px; margin-bottom:6px; font-size:20px">Keep going</h2>
+  <ul class="practice-list">
+    <li>Every exercise above has a real answer hidden in a <code>&lt;details&gt;</code> — close this page, come back tomorrow, and do them from memory before checking.</li>
+    <li>Your app already has a Neo4j Browser link one click from any selected node — that's a full Cypher console against your real, current data, no separate setup.</li>
+    <li>Next time a code review flags a Cypher bug in this repo, read the fix before applying it. You now have the vocabulary for all of them.</li>
+  </ul>
+</section>
+
+<script>
+(function () {
+  // Minimal syntax highlighter for any .cypher block NOT already hand-annotated with spans —
+  // most blocks above are already marked up for exact color control, this just guards against
+  // any left in plain text.
+  var KEYWORDS = /\b(MATCH|OPTIONAL MATCH|WHERE|RETURN|MERGE|SET|WITH|UNWIND|FOREACH|CASE|WHEN|THEN|ELSE|END|AND|OR|NOT|AS|ORDER BY|DESC|ASC|LIMIT|IN|IS NULL|IS NOT NULL|CONTAINS|NOT EXISTS)\b/g;
+  document.querySelectorAll('pre.cypher code').forEach(function (el) {
+    if (el.querySelector('span')) return; // already hand-annotated
+    el.innerHTML = el.textContent.replace(KEYWORDS, '<span class="kw">$1</span>');
+  });
+})();
+</script>
+
+</body></html>

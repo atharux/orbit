@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react'
 import type { Lead, Vertical, OutreachStatus } from '../types'
 import { STATUS_LABEL, STATUS_COLOR } from '../types'
+import { openExternal } from '../utils/openExternal'
+
+// Normalize a stored website into an openable URL (leads often omit the scheme).
+function hrefFor(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`
+}
 
 type SortKey = 'name' | 'city' | 'category' | 'status' | 'updated_at'
 
@@ -153,7 +159,7 @@ export function LeadTable({ leads, vertical, selectedId, selectedIds, onSelect, 
                   <a
                     className="contact-link"
                     href={`mailto:${lead.email}`}
-                    onClick={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); e.preventDefault(); openExternal(`mailto:${lead.email}`) }}
                     title={lead.email}
                   >
                     {lead.email}
@@ -166,10 +172,10 @@ export function LeadTable({ leads, vertical, selectedId, selectedIds, onSelect, 
                 {lead.website ? (
                   <a
                     className="contact-link"
-                    href={lead.website}
+                    href={hrefFor(lead.website)}
                     target="_blank"
                     rel="noreferrer"
-                    onClick={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); e.preventDefault(); openExternal(hrefFor(lead.website!)) }}
                     title={lead.website}
                   >
                     {lead.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}

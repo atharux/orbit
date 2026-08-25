@@ -11,6 +11,7 @@ interface Props {
 export function SettingsModal({ initial, onSave, onClose }: Props) {
   const [s, setS] = useState<AppSettings>(initial)
   const [showKey, setShowKey] = useState(false)
+  const [showAuraPassword, setShowAuraPassword] = useState(false)
 
   const isCustomModel = !FREE_MODELS.find(m => m.id === s.openRouterModel)
 
@@ -91,6 +92,69 @@ export function SettingsModal({ initial, onSave, onClose }: Props) {
             />
           </div>
 
+          {/* Neo4j Aura connection */}
+          <div>
+            <div className="field-label">
+              Neo4j Aura connection{' '}
+              <span className="text-faint" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                — enables the live graph view
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input
+                className="field-input"
+                placeholder="neo4j+s://xxxxxxxx.databases.neo4j.io"
+                value={s.neo4jUri}
+                onChange={e => set('neo4jUri', e.target.value)}
+                style={{ fontFamily: 'var(--mono)', fontSize: 12 }}
+              />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  className="field-input"
+                  placeholder="username"
+                  value={s.neo4jUsername}
+                  onChange={e => set('neo4jUsername', e.target.value)}
+                  style={{ flex: 1, fontFamily: 'var(--mono)', fontSize: 12 }}
+                />
+                <input
+                  className="field-input"
+                  type={showAuraPassword ? 'text' : 'password'}
+                  placeholder="password"
+                  value={s.neo4jPassword}
+                  onChange={e => set('neo4jPassword', e.target.value)}
+                  style={{ flex: 1, fontFamily: 'var(--mono)', fontSize: 12 }}
+                />
+                <button
+                  className="btn btn-ghost"
+                  style={{ height: 36, padding: '0 10px', fontSize: 11, flexShrink: 0 }}
+                  onClick={() => setShowAuraPassword(v => !v)}
+                >
+                  {showAuraPassword ? 'hide' : 'show'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  className="field-input"
+                  placeholder="database (default: neo4j)"
+                  value={s.neo4jDatabase}
+                  onChange={e => set('neo4jDatabase', e.target.value)}
+                  style={{ flex: 1, fontFamily: 'var(--mono)', fontSize: 12 }}
+                />
+                <input
+                  className="field-input"
+                  placeholder="instance name (optional, for the HUD)"
+                  value={s.neo4jInstanceName}
+                  onChange={e => set('neo4jInstanceName', e.target.value)}
+                  style={{ flex: 1, fontFamily: 'var(--mono)', fontSize: 12 }}
+                />
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--mono)', marginTop: 5 }}>
+              Stored only on this device, never in the app's build — safe to fill in even on a
+              packaged/shared build.
+            </div>
+          </div>
+
           {/* Automation */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
@@ -130,6 +194,7 @@ export function SettingsModal({ initial, onSave, onClose }: Props) {
               <span>key: {s.openRouterApiKey ? `${s.openRouterApiKey.slice(0, 8)}...` : 'not set'}</span>
               <span>model: {s.openRouterModel || 'auto'}</span>
               <span>worker: {s.scraperUrl || 'venue-scraper.athar-hafiz.workers.dev'}</span>
+              <span>aura: {s.neo4jUri && s.neo4jUsername && s.neo4jPassword ? (s.neo4jInstanceName || s.neo4jUri) : 'not set'}</span>
             </div>
           </div>
         </div>

@@ -1,43 +1,58 @@
 import neo4j from 'neo4j-driver-lite'
 import type { GraphData, GraphNode, GraphLink, NodeKind, LinkKind } from './types'
+import { loadSettings } from '../settings'
 
-// Live read from Neo4j Aura. Enabled automatically when the three VITE_NEO4J_*
-// vars are present in .env. Read-only (executeRead) — matches the build plan's
-// "demo agent stays read-only" guardrail.
+// Live read from Neo4j Aura. Credentials come from Settings (localStorage,
+// per-device, defaulting from VITE_NEO4J_* when that env var is present --
+// i.e. always on local `npm run dev`), NOT from a value baked into the build.
+// Read-only (executeRead) — matches the build plan's "demo agent stays
+// read-only" guardrail.
 //
-// NOTE: putting Aura creds in VITE_ vars ships them in the browser bundle. Fine
-// for a hackathon with a throwaway read-only user; for anything public, this
-// query needs to move server-side. See GRAPHRAG.md.
+// NOTE: this used to read VITE_NEO4J_* directly, which bakes creds into
+// whatever bundle Vite produces. That's fine for `npm run dev` (the bundle
+// never leaves your machine) but not for a packaged/distributed Tauri build,
+// which .env.production is deliberately kept blank to prevent (see
+// linkedinImport.ts's schema-decision comment) -- reading through Settings
+// instead means a packaged build ships with zero credentials, and each
+// install's user pastes their own, kept on-device only. For anything public
+// beyond a single trusted device, this still needs to move server-side. See
+// GRAPHRAG.md.
 
-const URI = import.meta.env.VITE_NEO4J_URI as string | undefined
-const USER = import.meta.env.VITE_NEO4J_USERNAME as string | undefined
-const PASS = import.meta.env.VITE_NEO4J_PASSWORD as string | undefined
-// Aura's database is usually "neo4j", but some instances name it after the
-// instance id — take it from env when provided.
-const DB = (import.meta.env.VITE_NEO4J_DATABASE as string | undefined) || 'neo4j'
+function creds() {
+  const s = loadSettings()
+  return {
+    uri: s.neo4jUri || undefined,
+    user: s.neo4jUsername || undefined,
+    pass: s.neo4jPassword || undefined,
+    db: s.neo4jDatabase || 'neo4j',
+    name: s.neo4jInstanceName || undefined,
+  }
+}
 
 export function isLiveConfigured(): boolean {
-  return Boolean(URI && USER && PASS)
+  const { uri, user, pass } = creds()
+  return Boolean(uri && user && pass)
 }
 
 // Host portion of the bolt URI, e.g. "bfc973e5.databases.neo4j.io".
-function auraHost(): string {
-  return /\/\/([^/:?#]+)/.exec(URI ?? '')?.[1] ?? ''
+function auraHost(uri: string): string {
+  return /\/\/([^/:?#]+)/.exec(uri)?.[1] ?? ''
 }
 
 // Aura connection metadata for the HUD — proves "this is a real instance".
-// name comes from an optional VITE_NEO4J_INSTANCE_NAME; id/host/db are derived.
+// name comes from the optional instance-name setting; id/host/db are derived.
 export function liveInstanceInfo(): {
   host: string; instanceId: string; database: string; user: string; name?: string
 } | null {
+  const { uri, user, db, name } = creds()
   if (!isLiveConfigured()) return null
-  const host = auraHost()
+  const host = auraHost(uri!)
   return {
     host,
     instanceId: host.split('.')[0], // Aura's instance id is the first host label
-    database: DB,
-    user: USER!,
-    name: (import.meta.env.VITE_NEO4J_INSTANCE_NAME as string | undefined) || undefined,
+    database: db,
+    user: user!,
+    name,
   }
 }
 
@@ -45,8 +60,9 @@ export function liveInstanceInfo(): {
 // optional query loaded in the editor. Password is never included — Browser
 // prompts for it. Great "open the real database" demo button.
 export function browserDeepLink(cypher?: string): string | null {
+  const { uri, user } = creds()
   if (!isLiveConfigured()) return null
-  const params = new URLSearchParams({ connectURL: `neo4j+s://${USER}@${auraHost()}` })
+  const params = new URLSearchParams({ connectURL: `neo4j+s://${user}@${auraHost(uri!)}` })
   if (cypher) { params.set('cmd', 'edit'); params.set('arg', cypher) }
   return `https://browser.neo4j.io/?${params.toString()}`
 }
@@ -70,7 +86,61 @@ function nodeToGraphNode(n: any): GraphNode | null {
     verified: typeof p.verified === 'boolean' ? p.verified : undefined,
     district: p.district ?? undefined,
     website: p.website ?? undefined, // now synced full-fidelity — powers the "no website" preset live
+    verticalId: p.vertical_id || undefined,
+    apps: p.apps ? p.apps.split(' · ') : undefined,
+    lastShipped: p.last_shipped || undefined,
+    linkedinUrl: p.linkedin_url || undefined,
   }
+}
+
+// Run an arbitrary READ query and return plain, JSON-serializable rows --
+// unlike runReadCypher below (built for the ask panel's "highlight these
+// nodes" use case, which only returns a summary + elementIds), this is for
+// callers that need the actual values, e.g. smartPresets.ts profiling a
+// vertical's shape before asking an LLM to propose questions about it.
+export async function runReadRows(
+  cypher: string,
+  params: Record<string, unknown> = {},
+): Promise<Record<string, any>[]> {
+  if (!isLiveConfigured()) throw new Error('Neo4j not configured — add your Aura connection in Settings')
+  const { uri, user, pass, db } = creds()
+  const driver = neo4j.driver(uri!, neo4j.auth.basic(user!, pass!))
+  try {
+    const result = await driver.executeQuery(cypher, params, { database: db, routing: 'READ' as any })
+    return result.records.map(rec => {
+      const row: Record<string, any> = {}
+      for (const key of rec.keys) {
+        const v: any = rec.get(key)
+        // Neo4j Integer -> plain number (safe well under 2^53 for our counts).
+        row[key as string] = v && typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : v
+      }
+      return row
+    })
+  } finally {
+    await driver.close()
+  }
+}
+
+// Renders a query's actual scalar values into a short readable line, instead
+// of just a row count -- e.g. an aggregate query grouping/counting something
+// (exactly the shape smartPresets.ts's generated questions tend to produce)
+// reads as "Senior Software Engineer (6), Founder (5), Designer (3)", not
+// just "10 rows returned". Skips Node/Relationship/array values (those get
+// highlighted in the 3D scene instead, via nodeIds) -- only plain
+// scalars (the count/label columns an aggregate actually returns) print.
+function summarizeRows(records: { keys: readonly PropertyKey[]; get(key: any): any }[]): string | null {
+  const lines: string[] = []
+  for (const rec of records.slice(0, 8)) {
+    const parts: string[] = []
+    for (const key of rec.keys) {
+      let v: any = rec.get(key)
+      if (v && typeof v === 'object' && typeof v.toNumber === 'function') v = v.toNumber() // Neo4j Integer -> plain number
+      if (v === null || v === undefined || typeof v === 'object') continue // Node/Relationship/array
+      parts.push(String(v))
+    }
+    if (parts.length) lines.push(parts.join(' — '))
+  }
+  return lines.length ? lines.join('; ') : null
 }
 
 // Run an arbitrary READ query (used by the free-text "ask the graph" panel).
@@ -80,10 +150,11 @@ function nodeToGraphNode(n: any): GraphNode | null {
 export async function runReadCypher(
   cypher: string,
 ): Promise<{ summary: string; nodeIds: string[]; rows: number }> {
-  if (!isLiveConfigured()) throw new Error('Neo4j env not configured')
-  const driver = neo4j.driver(URI!, neo4j.auth.basic(USER!, PASS!))
+  if (!isLiveConfigured()) throw new Error('Neo4j not configured — add your Aura connection in Settings')
+  const { uri, user, pass, db } = creds()
+  const driver = neo4j.driver(uri!, neo4j.auth.basic(user!, pass!))
   try {
-    const result = await driver.executeQuery(cypher, {}, { database: DB, routing: 'READ' as any })
+    const result = await driver.executeQuery(cypher, {}, { database: db, routing: 'READ' as any })
     const nodeIds = new Set<string>()
     for (const rec of result.records) {
       for (const key of rec.keys) {
@@ -95,15 +166,19 @@ export async function runReadCypher(
       }
     }
     const rows = result.records.length
-    return { summary: `${rows} row${rows === 1 ? '' : 's'} returned`, nodeIds: [...nodeIds], rows }
+    const rowLabel = `${rows} row${rows === 1 ? '' : 's'} returned`
+    const preview = rows > 0 ? summarizeRows(result.records) : null
+    const truncated = preview && rows > 8 ? ` (+${rows - 8} more)` : ''
+    return { summary: preview ? `${rowLabel}: ${preview}${truncated}` : rowLabel, nodeIds: [...nodeIds], rows }
   } finally {
     await driver.close()
   }
 }
 
 export async function fetchLiveGraph(): Promise<GraphData> {
-  if (!isLiveConfigured()) throw new Error('Neo4j env not configured')
-  const driver = neo4j.driver(URI!, neo4j.auth.basic(USER!, PASS!))
+  if (!isLiveConfigured()) throw new Error('Neo4j not configured — add your Aura connection in Settings')
+  const { uri, user, pass, db } = creds()
+  const driver = neo4j.driver(uri!, neo4j.auth.basic(user!, pass!))
   try {
     const nodes = new Map<string, GraphNode>()
     const links: GraphLink[] = []
@@ -116,7 +191,7 @@ export async function fetchLiveGraph(): Promise<GraphData> {
        WHERE m:Venue OR m:Contact OR m:Source OR m:Sequence
        RETURN n, type(r) AS rel, m`,
       {},
-      { database: DB, routing: 'READ' as any },
+      { database: db, routing: 'READ' as any },
     )
 
     for (const rec of result.records) {

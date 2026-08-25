@@ -12,9 +12,13 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.9",
+    "@neo4j-cypher/codemirror": "^1.0.3",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-http": "^2.5.9",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "3d-force-graph": "^1.80.0",
     "neo4j-driver-lite": "^6.2.0",
     "react": "^19.2.6",

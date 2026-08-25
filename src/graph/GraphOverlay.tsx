@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, lazy, Suspense } from 'react'
 import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import SpriteText from 'three-spritetext'
@@ -10,10 +10,20 @@ import type { GraphData, GraphNode, GraphLink } from './types'
 import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
-import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink } from './neo4jSource'
-import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, type AskResult } from './ask'
+import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink, runReadCypher } from './neo4jSource'
+import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, verticalPresets, WRITE_RE, type AskResult, type Preset } from './ask'
+import { logAsk, logOutcome, type AskOutcome } from './askLog'
+import { loadSmartPresets, generateSmartPresets, type SmartPreset } from './smartPresets'
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
+import { openExternal } from '../utils/openExternal'
+// Lazy: CypherEditor pulls in CodeMirror + the ANTLR-based Cypher grammar,
+// and only ever renders when meta?.origin === 'live' -- code-split so that
+// cost isn't paid by everyone loading the graph, only once a live Aura
+// connection is actually up.
+const CypherEditor = lazy(() => import('./CypherEditor'))
+
+const CYPHER_TUTORIAL_URL = 'https://claude.ai/code/artifact/7587b27c-e615-4881-ab98-c705d636b94e'
 
 // Full-screen immersive 3D graph. The light dashboard drops away into a dark
 // space where venues/contacts float and relationships stream particles. Orbit
@@ -29,18 +39,21 @@ const LINK_COLOR: Record<GraphLink['kind'], string> = {
   VERIFIED_BY: '#f97316',
   ENROLLED_IN: '#34d399',
   TARGETS: '#22d3ee',
+  COLLEAGUE_OF: '#3b9eff',
 }
 const LINK_DIM: Record<GraphLink['kind'], string> = {
   WORKS_AT: '#39465a',
   VERIFIED_BY: '#5c3a1e',
   ENROLLED_IN: '#204a3b',
   TARGETS: '#1f4552',
+  COLLEAGUE_OF: '#1a3a5c',
 }
 const REL_LABEL: Record<GraphLink['kind'], string> = {
   WORKS_AT: 'works at',
   VERIFIED_BY: 'verified by',
   ENROLLED_IN: 'enrolled in',
   TARGETS: 'targets',
+  COLLEAGUE_OF: 'colleague of',
 }
 
 const DIM = '#1f2937'
@@ -52,10 +65,10 @@ const KIND_COLOR_LIGHT: Record<GraphNode['kind'], string> = {
   venue: '#2f7d84', contact: '#6a5aa6', source: '#b5622a', sequence: '#4d7a46',
 }
 const LINK_COLOR_LIGHT: Record<GraphLink['kind'], string> = {
-  WORKS_AT: '#6b6659', VERIFIED_BY: '#b5622a', ENROLLED_IN: '#4d7a46', TARGETS: '#2f7d84',
+  WORKS_AT: '#6b6659', VERIFIED_BY: '#b5622a', ENROLLED_IN: '#4d7a46', TARGETS: '#2f7d84', COLLEAGUE_OF: '#6a5aa6',
 }
 const LINK_DIM_LIGHT: Record<GraphLink['kind'], string> = {
-  WORKS_AT: '#c3bba6', VERIFIED_BY: '#d8b48f', ENROLLED_IN: '#a9c2a0', TARGETS: '#9ec6cb',
+  WORKS_AT: '#c3bba6', VERIFIED_BY: '#d8b48f', ENROLLED_IN: '#a9c2a0', TARGETS: '#9ec6cb', COLLEAGUE_OF: '#c9c0dd',
 }
 
 interface CanvasTheme {
@@ -63,6 +76,10 @@ interface CanvasTheme {
   node: Record<GraphNode['kind'], string>; dim: string
   linkFull: Record<GraphLink['kind'], string>; linkRest: Record<GraphLink['kind'], string>; linkFade: string
   labelText: string; labelBg: string; labelBorder: string
+  // Faded label styling for non-neighbor nodes once something is selected —
+  // without this, every label renders at full prominence regardless of
+  // selection and dense clusters turn into an unreadable wall of text.
+  labelTextDim: string; labelBgDim: string; labelBorderDim: string
 }
 
 // Dark = the original immersive space; light = an engraved cream "plate" (no
@@ -72,11 +89,13 @@ const CANVAS: Record<ThemeMode, CanvasTheme> = {
     bg: '#05060a', bloom: 0.32, stars: true, node: KIND_COLOR, dim: DIM,
     linkFull: LINK_COLOR, linkRest: LINK_DIM, linkFade: '#151b26',
     labelText: '#dfe6f0', labelBg: 'rgba(6,8,13,0.82)', labelBorder: 'rgba(120,132,148,0.18)',
+    labelTextDim: 'rgba(223,230,240,0.25)', labelBgDim: 'rgba(6,8,13,0.35)', labelBorderDim: 'rgba(120,132,148,0.06)',
   },
   light: {
     bg: '#efeadd', bloom: 0, stars: false, node: KIND_COLOR_LIGHT, dim: '#cfc7b5',
     linkFull: LINK_COLOR_LIGHT, linkRest: LINK_DIM_LIGHT, linkFade: '#ddd5c2',
     labelText: '#201e18', labelBg: 'rgba(246,242,231,0.92)', labelBorder: 'rgba(32,30,24,0.22)',
+    labelTextDim: 'rgba(32,30,24,0.25)', labelBgDim: 'rgba(246,242,231,0.35)', labelBorderDim: 'rgba(32,30,24,0.06)',
   },
 }
 
@@ -137,6 +156,34 @@ function neighborsOf(g: GraphData, id: string): Neighbor[] {
   return out
 }
 
+interface PopoutChip { label: string; value: string; onClick?: () => void }
+
+// The context-chip popout's content: real GraphNode fields only, nothing
+// invented. At most 5 candidates, one per field -- the label-avoiding arc
+// at the render site sizes itself to whatever count actually shows. No
+// "connections" chip -- the selected-node card right next to it already
+// says "N connections," so it was pure duplication, not new information.
+// Everything else only appears when that field actually has a value, same
+// defensive pattern the action bar a few hundred lines down already uses.
+function buildPopoutChips(node: GraphNode): PopoutChip[] {
+  const candidates: (PopoutChip | null)[] = [
+    node.district ? { label: 'District', value: node.district } : null,
+    node.verified ? { label: 'Verified', value: '✓' } : null,
+    node.website
+      ? { label: 'Website', value: '↗ open', onClick: () => openExternal(hrefFor(node.website!)) }
+      : node.linkedinUrl
+        ? { label: 'LinkedIn', value: '↗ open', onClick: () => openExternal(hrefFor(node.linkedinUrl!)) }
+        : null,
+    node.apps?.length ? { label: 'Apps', value: String(node.apps.length) } : null,
+    node.lastShipped ? { label: 'Shipped', value: node.lastShipped } : null,
+  ]
+  // No slice: 5 candidates above is already the ceiling, so capping at 4
+  // made the lowest-priority one (Shipped) structurally unreachable on any
+  // node with all 5 fields set -- confirmed reachable on live Neo4j data,
+  // where fields aren't cleanly separated by kind the way local sample data is.
+  return candidates.filter((c): c is PopoutChip => c !== null)
+}
+
 // Smart find: multi-token AND match over a node's label/sub/district, plus
 // kind, vertical and verified constraints. Returns the ids of matching nodes.
 function filterNodeIds(
@@ -159,7 +206,7 @@ function filterNodeIds(
     .map(n => n.id)
 }
 
-export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel, onLeadStatusChange, onOpenLead, onBulkEnrich }: {
+export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel, onLeadStatusChange, onOpenLead, onBulkEnrich, onOpenCypherTutorial }: {
   leads: Lead[]
   onClose: () => void
   openRouterApiKey?: string
@@ -172,6 +219,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   onOpenLead?: (leadId: string) => void
   // Bulk-enrich the selected leads (fills blank email/phone/website via scraper).
   onBulkEnrich?: (leadIds: string[]) => Promise<{ updated: number; failed: number }>
+  // "Learn Cypher" now opens the in-app tutorial (Pitch page's Cypher Tutorial
+  // tab) instead of the external claude.ai artifact. Optional, falling back
+  // to the external link only if a caller doesn't wire this up.
+  onOpenCypherTutorial?: () => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<any>(null)
@@ -183,6 +234,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [liveWarning, setLiveWarning] = useState<string | null>(null)
   const [selected, setSelected] = useState<GraphNode | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([]) // multi-selection for bulk actions
+
+  // Context-chip popout: appears once the post-click camera zoom lands, then
+  // tracks the node's screen position every frame as the camera orbits.
+  // Position updates are imperative (a ref, not state) -- going through
+  // React state at 60fps would mean a full re-render every frame for
+  // something that's really just "move this div."
+  const [popout, setPopout] = useState<{ kind: GraphNode['kind']; chips: PopoutChip[] } | null>(null)
+  const popoutRef = useRef<HTMLDivElement>(null)
+  const popoutNodeRef = useRef<any>(null) // the live 3d-force-graph node object (has .x/.y/.z), or null when hidden
   const [bulkMsg, setBulkMsg] = useState('')
   const [enriching, setEnriching] = useState(false)
   const [errMsg, setErrMsg] = useState('')
@@ -191,11 +251,26 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // Ask panel state
   const [askInput, setAskInput] = useState('')
   const [asking, setAsking] = useState(false)
-  const [askResult, setAskResult] = useState<(AskResult & { q: string }) | null>(null)
+  const [askResult, setAskResult] = useState<(AskResult & { q: string; queryId: string }) | null>(null)
+  const [askOutcome, setAskOutcome] = useState<AskOutcome | null>(null)
   const [askError, setAskError] = useState('')
   const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
   const canAskLocal = !canAskLive && localAvailable(openRouterApiKey, graphData)
+
+  // Auto-generated, per-vertical smart question catalog (smartPresets.ts).
+  // smartGenAttempted guards against re-firing generation for the same
+  // vertical on every re-render within this mount -- a ref, not state,
+  // since it's bookkeeping that must never itself trigger a re-render.
+  const [smartPresetsByVertical, setSmartPresetsByVertical] = useState<Record<string, SmartPreset[]>>({})
+  const [smartGenerating, setSmartGenerating] = useState<Set<string>>(new Set())
+  const smartGenAttempted = useRef<Set<string>>(new Set())
+
+  // Cypher editor state — sits next to the NL "ask" box, runs read-only
+  // against the same live Aura instance.
+  const [cypherInput, setCypherInput] = useState('')
+  const [cypherRunning, setCypherRunning] = useState(false)
+  const [cypherError, setCypherError] = useState('')
 
   // FIND panel state — instant client-side search + toggle filter chips.
   const [filterText, setFilterText] = useState('')
@@ -240,10 +315,22 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       const highlightLinks = new Set<GraphLink>()
       const multiSel = new Set<string>() // shift/⌘-click or preset-driven multi-selection
       let focused: GraphNode | null = null
+      let popoutTimer: number | null = null
+      function clearPopout() {
+        if (popoutTimer !== null) { window.clearTimeout(popoutTimer); popoutTimer = null }
+        popoutNodeRef.current = null
+        setPopout(null)
+      }
 
       const nodeIsHot = (n: any) => highlightNodes.size === 0 || highlightNodes.has(n.id)
       // Live canvas theme — read fresh on every accessor call so applyTheme() takes effect.
       const ct = () => canvasThemeRef.current
+      // SpriteText instances keyed by node id, so refreshHighlight() can restyle
+      // labels in place on every click (cheap) instead of going through
+      // .nodeThreeObject(...) again, which forces 3d-force-graph to clear and
+      // rebuild every node's Object3D — fine for a rare theme toggle, too
+      // expensive to run on every single selection change.
+      const labelById = new Map<string, SpriteText>()
 
       const linkRestColor = (l: any) =>
         highlightLinks.has(l) ? ct().linkFull[l.kind as GraphLink['kind']]
@@ -261,17 +348,19 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         .nodeThreeObjectExtend(true)
         .nodeThreeObject((n: any) => {
           const kind = n.kind as GraphNode['kind']
+          const hot = nodeIsHot(n)
           const t = new SpriteText(n.label)
-          t.color = ct().labelText
+          t.color = hot ? ct().labelText : ct().labelTextDim
           t.fontFace = 'DM Mono, ui-monospace, monospace'
           t.fontWeight = '600'
           t.textHeight = kind === 'venue' || kind === 'sequence' ? 3.4 : 2.4
-          t.backgroundColor = ct().labelBg
-          t.borderColor = ct().labelBorder
+          t.backgroundColor = hot ? ct().labelBg : ct().labelBgDim
+          t.borderColor = hot ? ct().labelBorder : ct().labelBorderDim
           t.borderWidth = 0.15
           t.borderRadius = 2.5
           t.padding = 2.2
           t.position.set(0, kind === 'venue' ? 11 : kind === 'sequence' ? 10 : 8, 0)
+          labelById.set(n.id, t)
           return t
         })
         // Hover card carries the detail so the always-on labels stay short.
@@ -358,9 +447,29 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           .linkWidth(Graph.linkWidth())
           .linkDirectionalArrowColor(Graph.linkDirectionalArrowColor())
           .linkDirectionalParticles(Graph.linkDirectionalParticles())
+        // Restyle existing label sprites in place (cheap) so non-neighbors fade
+        // too, not just the node dot — see labelById above for why this isn't
+        // a .nodeThreeObject(...) call.
+        for (const n of Graph.graphData().nodes as any[]) {
+          const t = labelById.get(n.id)
+          if (!t) continue
+          const hot = nodeIsHot(n)
+          t.color = hot ? ct().labelText : ct().labelTextDim
+          t.backgroundColor = hot ? ct().labelBg : ct().labelBgDim
+          t.borderColor = hot ? ct().labelBorder : ct().labelBorderDim
+        }
       }
 
       function selectNode(node: any) {
+        // NOTE: previously short-circuited here when `focused?.id ===
+        // node.id`, to avoid re-flying the camera on a same-node re-click.
+        // Reverted -- `focused` isn't reset by the ~10 other paths that
+        // clear selection/highlight state (focusNodes, toggleSelect, every
+        // preset/FIND/ask-result call site), so it goes stale independently
+        // of `selected`/highlightNodes, and the guard made the node
+        // permanently unclickable after any of those ran. The 1.5s cosmetic
+        // re-trigger delay on a genuine same-node re-click is the smaller
+        // problem.
         focused = node
         multiSel.clear()
         setSelectedIds([])
@@ -382,7 +491,24 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         // Fly the camera to the node.
         const dist = 120
         const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1)
-        Graph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, 1400)
+        const flightMs = 1400
+        Graph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, flightMs)
+
+        // Context chips pop out once the zoom lands, not before -- and only
+        // for whichever node is still selected when the timer fires, so a
+        // fast reselect mid-flight can't leave a stale popout pointing at
+        // the wrong node. cameraPosition() has no completion callback (see
+        // its .d.ts), so a timer matching its own transition duration is
+        // the only option here.
+        clearPopout()
+        popoutTimer = window.setTimeout(() => {
+          popoutTimer = null
+          const chips = buildPopoutChips(node)
+          if (chips.length === 0) return
+          popoutNodeRef.current = node
+          setPopout({ kind: node.kind, chips })
+          requestAnimationFrame(tickPopoutPosition) // (re)start tracking -- see its own definition for why it's not started unconditionally
+        }, flightMs + 60)
       }
 
       // Reflect the multi-selection into the highlight + sync to React.
@@ -401,6 +527,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       function toggleSelect(id: string) {
         multiSel.has(id) ? multiSel.delete(id) : multiSel.add(id)
         setSelected(null)
+        clearPopout()
         applySelectionHighlight()
       }
 
@@ -419,7 +546,43 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         refreshHighlight()
         setSelected(null)
         setSelectedIds([])
+        clearPopout()
       })
+
+      // Keep the popout glued to its node's on-screen position every frame,
+      // so it tracks correctly through camera orbit after landing -- an
+      // imperative style mutation, not React state, since this runs at
+      // render-loop rate. NOT Graph.onEngineTick(): that fires only while
+      // the force-layout simulation is actively cooling, which has long
+      // settled by the time a user clicks a node minutes later -- confirmed
+      // by testing, the container's transform was simply never set. Three's
+      // own render loop runs continuously regardless (that's what draws
+      // camera orbit at all), but 3d-force-graph doesn't expose a hook into
+      // it, so this is a small self-driven rAF loop instead.
+      //
+      // Self-terminating, not started unconditionally at graph setup: it
+      // stops rescheduling itself the moment there's no popout to track, and
+      // gets kicked off again (see the setTimeout above) only when one
+      // actually appears -- a permanent per-frame callback for a feature
+      // that's idle most of a session isn't worth the standing cost.
+      function tickPopoutPosition() {
+        if (disposed) return
+        const n = popoutNodeRef.current
+        // Only stop rescheduling when there's genuinely nothing to track.
+        // A React setState from a raw setTimeout (not an event handler)
+        // isn't guaranteed to commit before this fires, so the very first
+        // tick can land before <div ref={popoutRef}> exists yet -- if that
+        // also stopped the loop, the chips would mount but never get a
+        // transform, stuck at the container's default (0,0) forever. Keep
+        // retrying every frame until the ref shows up.
+        if (n) {
+          if (popoutRef.current) {
+            const { x, y } = Graph.graph2ScreenCoords(n.x || 0, n.y || 0, n.z || 0)
+            popoutRef.current.style.transform = `translate(${x}px, ${y}px)`
+          }
+          requestAnimationFrame(tickPopoutPosition)
+        }
+      }
 
       // Imperative handle for the ask panel: light up an arbitrary node set.
       function focusNodes(ids: string[]) {
@@ -427,6 +590,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         highlightLinks.clear()
         multiSel.clear()
         setSelected(null)
+        clearPopout()
         if (ids.length === 0) { controls.autoRotate = true; refreshHighlight(); setSelectedIds([]); return }
         ids.forEach(id => { highlightNodes.add(id); multiSel.add(id) })
         for (const l of (Graph.graphData().links as any[])) {
@@ -466,7 +630,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       // fit once the layout settles
       setTimeout(() => Graph.zoomToFit(1200, 60), 700)
 
-      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer }
+      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer, clearPopout }
       void focused
     }
 
@@ -476,6 +640,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       if (g) {
         window.removeEventListener('resize', g.onResize)
         clearInterval(g.impulseTimer)
+        g.clearPopout() // cancel any pending "chips pop in" timer -- setPopout after unmount would be a no-op warning otherwise
         g.Graph._destructor?.()
       }
       graphRef.current = null
@@ -488,26 +653,45 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     graphRef.current?.applyTheme?.(CANVAS[theme])
   }, [theme])
 
-  function runPreset(p: typeof PRESETS[number]) {
-    if (!graphData) return
-    setAskError(''); setAskNote('')
+  // Every ask-panel entry point (preset, NL, Cypher, path) writes into this
+  // same askResult -- one busy flag and one "clear all transient state"
+  // helper so a fix to how one clears its errors can't drift from the
+  // others the way runCypher's did before this pass (it cleared cypherError,
+  // nothing else did).
+  const busy = asking || cypherRunning
+  function clearTransientAskState() {
+    setAskError(''); setCypherError(''); setAskNote('')
+  }
+
+  function runPreset(p: Preset) {
+    if (!graphData || busy) return
+    // A smart preset (smartPresets.ts) has no client-side filter logic to
+    // run -- it's a question grounded in a live schema profile, meant to
+    // flow through the same live NL-ask pipeline a typed question would.
+    if (p.isSmart) { askQuestion(p.q); return }
+    clearTransientAskState()
     const res = p.run(graphData)
-    setAskResult({ ...res, q: p.q })
+    const queryId = logAsk({ engine: 'preset', question: p.q, nodeIds: res.nodeIds })
+    setAskResult({ ...res, q: p.q, queryId })
+    setAskOutcome(null)
     graphRef.current?.focusNodes(res.nodeIds)
   }
 
-  async function runAsk() {
-    const q = askInput.trim()
-    if (!q || !graphData) return
-    setAskError(''); setAskNote(''); setAsking(true); setAskResult(null)
+  async function askQuestion(q: string) {
+    if (!q || !graphData || busy) return
+    clearTransientAskState(); setAsking(true); setAskResult(null)
     try {
       if (canAskLive) {
         const res = await askLive(q, openRouterApiKey!, openRouterModel)
-        setAskResult({ ...res, q })
+        const queryId = logAsk({ engine: 'live', question: q, nodeIds: res.nodeIds, cypher: res.cypher })
+        setAskResult({ ...res, q, queryId })
+        setAskOutcome(null)
         graphRef.current?.focusNodes(res.nodeIds)
       } else if (canAskLocal) {
         const res = await askLocal(q, graphData, openRouterApiKey!, openRouterModel)
-        setAskResult({ ...res, q })
+        const queryId = logAsk({ engine: 'local', question: q, nodeIds: res.nodeIds })
+        setAskResult({ ...res, q, queryId })
+        setAskOutcome(null)
         graphRef.current?.focusNodes(res.nodeIds)
       } else {
         setAskNote(openRouterApiKey
@@ -521,9 +705,58 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     }
   }
 
+  function runAsk() {
+    return askQuestion(askInput.trim())
+  }
+
   function clearAsk() {
-    setAskResult(null); setAskError(''); setAskNote(''); setAskInput('')
+    setAskResult(null); setAskOutcome(null); clearTransientAskState(); setAskInput('')
     graphRef.current?.focusNodes([])
+  }
+
+  // Run whatever's in the Cypher editor directly against live Aura. Same
+  // write-guard as askLive, same result shape, same node-highlighting --
+  // this is the manual-query sibling of the NL "ask" flow, not a separate
+  // feature bolted on. Gated on meta?.origin === 'live' (not just
+  // isLiveConfigured(), which is only "creds are present") so a fallback
+  // to sample/local data after a failed live fetch can't return real Aura
+  // elementIds that don't match any node in the graph actually on screen.
+  async function runCypher() {
+    const cypher = cypherInput.trim()
+    if (!cypher || busy || meta?.origin !== 'live') return
+    clearTransientAskState(); setCypherRunning(true); setAskResult(null)
+    try {
+      if (WRITE_RE.test(cypher)) throw new Error('Refused: only read-only queries run from here.')
+      const { summary, nodeIds } = await runReadCypher(cypher)
+      const queryId = logAsk({ engine: 'cypher', question: cypher, nodeIds, cypher })
+      setAskResult({ answer: summary, nodeIds, cypher, q: cypher, queryId })
+      setAskOutcome(null)
+      graphRef.current?.focusNodes(nodeIds)
+    } catch (e: any) {
+      // WRITE_RE is a fast, friendly pre-check, not the real boundary -- it
+      // can miss a write wrapped in a procedure call (e.g. a camelCase APOC
+      // name like apoc.refactor.mergeNodes). The actual protection is the
+      // server: runReadCypher opens a read-mode transaction, and Neo4j
+      // rejects any write attempted inside one, procedure or not. When that
+      // happens the driver's error is correct but not friendly -- normalize
+      // it to the same refusal message instead of showing the raw driver text.
+      const isAccessModeError = /AccessMode|ForbiddenOnReadOnly|write.{0,20}not.{0,20}allow/i.test(String(e?.code ?? '') + String(e?.message ?? ''))
+      setCypherError(isAccessModeError ? 'Refused: only read-only queries run from here.' : String(e?.message ?? e))
+    } finally {
+      setCypherRunning(false)
+    }
+  }
+
+  // "Edit in Cypher editor" bridge from a generated (askLive) query -- lets
+  // someone start in English, then hand-tune the Cypher it produced.
+  function loadIntoCypherEditor(cypher: string) {
+    setCypherInput(cypher)
+  }
+
+  function rateAsk(outcome: AskOutcome) {
+    if (!askResult) return
+    logOutcome(askResult.queryId, outcome)
+    setAskOutcome(outcome)
   }
 
   // Legend action: light up every node of a kind.
@@ -608,6 +841,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }
   function clearSelection() { setBulkMsg(''); graphRef.current?.focusNodes([]) }
 
+  function findPath() {
+    if (!graphData || selectedIds.length !== 2 || busy) return
+    const res = findShortestPath(graphData, selectedIds[0], selectedIds[1])
+    const queryId = logAsk({ engine: 'path', question: 'Shortest path between selection', nodeIds: res.nodeIds })
+    setAskResult({ ...res, q: 'Shortest path between selection', queryId })
+    setAskOutcome(null)
+    graphRef.current?.focusNodes(res.nodeIds)
+  }
+
   const stats = graphData ? computeStats(graphData) : null
   const neighbors = graphData && selected ? neighborsOf(graphData, selected.id) : []
   // The real lead behind the selected node (venue/contact on a leads graph),
@@ -624,6 +866,53 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     ? verticals.filter(v => graphData.nodes.some(n => n.verticalId === v.id))
     : []
   const hasVerifiedNodes = graphData ? graphData.nodes.some(n => n.verified) : false
+
+  // Study each live vertical's real shape and grow its question catalog
+  // automatically -- once per vertical id (smartGenAttempted), the first
+  // time its data is seen live with an OpenRouter key available. Runs for
+  // every vertical uniformly (not hand-wired per vertical like
+  // verticalPresets() in ask.ts), so a brand-new vertical gets a catalog
+  // with zero code changes the next time its data lands in Aura.
+  useEffect(() => {
+    if (meta?.origin !== 'live' || !graphData || !openRouterApiKey) return
+    for (const v of presentVerticals) {
+      if (smartGenAttempted.current.has(v.id)) continue
+      smartGenAttempted.current.add(v.id)
+      const cached = loadSmartPresets(v.id)
+      if (cached.length) {
+        setSmartPresetsByVertical(prev => ({ ...prev, [v.id]: cached }))
+        continue
+      }
+      setSmartGenerating(prev => new Set(prev).add(v.id))
+      generateSmartPresets(v, openRouterApiKey, openRouterModel)
+        .then(presets => setSmartPresetsByVertical(prev => ({ ...prev, [v.id]: presets })))
+        .catch(err => console.warn(`Smart preset generation failed for ${v.id}`, err))
+        .finally(() => setSmartGenerating(prev => { const next = new Set(prev); next.delete(v.id); return next }))
+    }
+    // presentVerticals is recomputed every render (new array identity), so it
+    // can't be a dependency without refiring every render -- graphData/meta
+    // changing is what actually means "there may be a new vertical to study".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphData, meta?.origin, openRouterApiKey, openRouterModel])
+
+  // Ask-panel catalogue: generic presets grouped by category, plus one group
+  // per vertical actually present in this graph (built-in, custom, or
+  // auto-generated from a live schema profile — smartPresets.ts).
+  const PRESET_CATEGORY_ORDER = ['Coverage', 'Verification', 'Outreach', 'Structure']
+  const presetGroups: { name: string; verticalId?: string; presets: Preset[] }[] = [
+    ...PRESET_CATEGORY_ORDER.map(name => ({ name, presets: PRESETS.filter(p => p.category === name) })),
+    ...presentVerticals.map(v => ({
+      name: v.name,
+      verticalId: v.id,
+      presets: [
+        ...verticalPresets(v),
+        ...(smartPresetsByVertical[v.id] ?? []).map((sp): Preset => ({
+          id: sp.id, q: sp.q, category: v.name, verticalId: v.id, isSmart: true,
+          run: () => ({ answer: '', nodeIds: [] }), // never called — runPreset() branches on isSmart first
+        })),
+      ],
+    })),
+  ]
 
   // Live Aura instance metadata + schema counts for the "it's real" demo chrome.
   const instance = meta?.origin === 'live' ? liveInstanceInfo() : null
@@ -645,6 +934,52 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   return (
     <div style={styles.overlay}>
       <div ref={containerRef} style={styles.canvas} />
+
+      {/* Context chips: pop out from a node's on-screen position once the
+          post-click camera zoom lands (scheduled in selectNode); tracked
+          every frame by the tickPopoutPosition rAF loop started in initGraph. */}
+      {popout && (
+        <div ref={popoutRef} style={styles.popoutContainer}>
+          {popout.chips.map((chip, i) => {
+            // Arc centered straight down, not a full ring: every node's own
+            // label renders directly above it (see nodeThreeObject's
+            // t.position.set), so a chip placed "at top" sits right on top
+            // of the node's own name -- confirmed on screen, not theoretical.
+            // ~240° of arc leaves a ~120° gap centered on "up" for the label.
+            const n = popout.chips.length
+            const arcCenter = Math.PI / 2 // straight down
+            const arcSpan = Math.PI * 1.33
+            const angle = n === 1 ? arcCenter : arcCenter - arcSpan / 2 + (arcSpan * i) / (n - 1)
+            const radius = 108
+            const tx = Math.round(Math.cos(angle) * radius)
+            const ty = Math.round(Math.sin(angle) * radius)
+            return (
+              <div
+                key={i}
+                style={{
+                  ...styles.popoutChip,
+                  borderColor: nodeCol[popout.kind] + '55',
+                  // 'both', not 'forwards': with a staggered delay, 'forwards'
+                  // leaves a chip in its default (fully opaque, untransformed,
+                  // pinned right on the node) state until its delay elapses --
+                  // a visible flash on every multi-chip selection. 'both' also
+                  // applies the 0% keyframe during the delay.
+                  animation: 'popoutChip .5s cubic-bezier(.2,.9,.3,1.25) both',
+                  animationDelay: `${i * 90}ms`,
+                  cursor: chip.onClick ? 'pointer' : 'default',
+                  ['--tx' as any]: `${tx}px`,
+                  ['--ty' as any]: `${ty}px`,
+                }}
+                onClick={chip.onClick}
+              >
+                <span style={{ ...styles.popoutChipDot, background: nodeCol[popout.kind] }} />
+                <span style={styles.popoutChipLabel}>{chip.label}</span>
+                <span style={styles.popoutChipValue}>{chip.value}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Top HUD */}
       <div style={styles.hudTop}>
@@ -675,29 +1010,120 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         <button style={styles.closeBtn} onClick={onClose}>Exit graph ✕</button>
       </div>
 
-      {/* Pipeline stats HUD */}
-      {stats && status === 'ready' && (
-        <div style={styles.stats}>
-          <div style={styles.statsHead}>OUTREACH STATE</div>
-          <div style={styles.statGrid}>
-            <Stat label="Companies" value={stats.venues} color={CANVAS[theme].node.venue} s={styles} />
-            <Stat label="Contacts" value={stats.contacts} color={CANVAS[theme].node.contact} s={styles} />
-            <Stat label="Verified" value={stats.verified} color={CANVAS[theme].node.sequence} s={styles} />
-            <Stat label="Sources" value={stats.sources} color={CANVAS[theme].node.source} s={styles} />
-          </div>
-          <div style={styles.coverageRow}>
-            <span>verified-contact coverage</span>
-            <span style={{ color: stats.coverage >= 60 ? '#34d399' : stats.coverage >= 30 ? '#f97316' : '#EF4444' }}>
-              {stats.coverage}%
-            </span>
-          </div>
-          <div style={styles.coverageBar}>
-            <div style={{ ...styles.coverageFill, width: `${stats.coverage}%` }} />
-          </div>
-          {stats.uncovered > 0 && (
-            <button style={styles.statAction} onClick={() => runPreset(PRESETS[1])}>
-              {stats.uncovered} {stats.uncovered === 1 ? 'company' : 'companies'} with no verified contact →
-            </button>
+      {/* Right rail — stats HUD + selected node card share one flex column so they can never overlap */}
+      {status === 'ready' && (stats || selected) && (
+        <div style={styles.rightRail}>
+          {stats && (
+            <div style={styles.stats}>
+              <div style={styles.statsHead}>OUTREACH STATE</div>
+              <div style={styles.statGrid}>
+                <Stat label="Companies" value={stats.venues} color={CANVAS[theme].node.venue} s={styles} />
+                <Stat label="Contacts" value={stats.contacts} color={CANVAS[theme].node.contact} s={styles} />
+                <Stat label="Verified" value={stats.verified} color={CANVAS[theme].node.sequence} s={styles} />
+                <Stat label="Sources" value={stats.sources} color={CANVAS[theme].node.source} s={styles} />
+              </div>
+              <div style={styles.coverageRow}>
+                <span>verified-contact coverage</span>
+                <span style={{ color: stats.coverage >= 60 ? '#34d399' : stats.coverage >= 30 ? '#f97316' : '#EF4444' }}>
+                  {stats.coverage}%
+                </span>
+              </div>
+              <div style={styles.coverageBar}>
+                <div style={{ ...styles.coverageFill, width: `${stats.coverage}%` }} />
+              </div>
+              {stats.uncovered > 0 && (
+                <button style={styles.statAction} onClick={() => runPreset(PRESETS[1])}>
+                  {stats.uncovered} {stats.uncovered === 1 ? 'company' : 'companies'} with no verified contact →
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Selected node card — the active surface, so it carries the strongest shadow/border of the rail */}
+          {selected && (
+            <div style={{ ...styles.card, borderColor: nodeCol[selected.kind] }}>
+              <div style={{ ...styles.cardKind, color: nodeCol[selected.kind] }}>
+                {KIND_LABEL[selected.kind]}{selected.verified ? ' · verified' : ''}
+              </div>
+              <div style={styles.cardTitle}>{selected.label}</div>
+              {selected.sub && <div style={styles.cardSub}>{selected.sub}</div>}
+              {selected.district && <div style={styles.cardSub}>{selected.district}</div>}
+              {selected.lastShipped && <div style={styles.cardSub}>last shipped {selected.lastShipped}</div>}
+              {!!selected.apps?.length && (
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(127,127,127,.25)' }}>
+                  <div style={{ ...styles.cardSub, letterSpacing: '.1em', textTransform: 'uppercase', fontSize: 9, opacity: .6 }}>
+                    Apps · {selected.apps.length}
+                  </div>
+                  {selected.apps.slice(0, 8).map(a => (
+                    <div key={a} style={{ ...styles.cardSub, opacity: .9 }}>{a}</div>
+                  ))}
+                  {selected.apps.length > 8 && (
+                    <div style={{ ...styles.cardSub, opacity: .5 }}>+{selected.apps.length - 8} more</div>
+                  )}
+                </div>
+              )}
+
+              {/* Action bar — only for nodes backed by a real lead */}
+              {activeLead && (
+                <div style={styles.actions}>
+                  <div style={styles.actionLinks}>
+                    {activeLead.website && (
+                      <a style={styles.actionBtn} href={hrefFor(activeLead.website)} target="_blank" rel="noopener noreferrer" onClick={e => { e.preventDefault(); openExternal(hrefFor(activeLead.website!)) }}>↗ Website</a>
+                    )}
+                    {activeLead.email && (
+                      <a style={styles.actionBtn} href={`mailto:${activeLead.email}`} onClick={e => { e.preventDefault(); openExternal(`mailto:${activeLead.email}`) }}>✉ Email</a>
+                    )}
+                    {activeLead.phone && (
+                      <a style={styles.actionBtn} href={`tel:${activeLead.phone}`} onClick={e => { e.preventDefault(); openExternal(`tel:${activeLead.phone}`) }}>☎ Call</a>
+                    )}
+                    {activeLead.instagram && (
+                      <a style={styles.actionBtn} href={instagramHref(activeLead.instagram)} target="_blank" rel="noopener noreferrer" onClick={e => { e.preventDefault(); openExternal(instagramHref(activeLead.instagram!)) }}>◎ Instagram</a>
+                    )}
+                  </div>
+                  {onLeadStatusChange && (
+                    <label style={styles.statusRow}>
+                      <span style={styles.statusLabel}>Status</span>
+                      <select
+                        style={{ ...styles.statusSelect, color: STATUS_COLOR[activeLead.status], borderColor: STATUS_COLOR[activeLead.status] + '66' }}
+                        value={activeLead.status}
+                        onChange={e => onLeadStatusChange(activeLead.id, e.target.value as OutreachStatus)}
+                      >
+                        {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  {onOpenLead && (
+                    <button style={styles.openDetailBtn} onClick={() => onOpenLead(activeLead.id)}>
+                      Open full detail ↗
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {neighbors.length > 0 && (
+                <div style={styles.connections}>
+                  <div style={styles.connHead}>{neighbors.length} connection{neighbors.length === 1 ? '' : 's'} · click to jump</div>
+                  <NeighborFan
+                    centerLabel={selected.label} centerColor={nodeCol[selected.kind]}
+                    neighbors={neighbors} nodeCol={nodeCol} relCol={relCol}
+                    onJump={id => graphRef.current?.selectNodeById(id)}
+                    textColor={panelTokens(theme).text2} bgColor={panelTokens(theme).card}
+                  />
+                  {neighbors.length > 8 && (
+                    <div style={{ ...styles.connHead, marginTop: 4, marginBottom: 0 }}>+{neighbors.length - 8} more below</div>
+                  )}
+                  {neighbors.map((nb, i) => (
+                    <button key={i} style={styles.connRow} onClick={() => graphRef.current?.selectNodeById(nb.id)}>
+                      <span style={{ ...styles.connDot, background: nodeCol[nb.node.kind] }} />
+                      <span style={styles.connRel}>{nb.dir === 'out' ? REL_LABEL[nb.rel] : `←${REL_LABEL[nb.rel]}`}</span>
+                      <span style={styles.connName}>{nb.node.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div style={styles.cardHint}>neighbors highlighted · click empty space to release</div>
+            </div>
           )}
         </div>
       )}
@@ -792,16 +1218,64 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               onChange={e => setAskInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') runAsk() }}
             />
-            <button style={styles.askBtn} onClick={runAsk} disabled={asking}>
+            <button style={styles.askBtn} onClick={runAsk} disabled={busy}>
               {asking ? '…' : '→'}
             </button>
           </div>
 
-          <div style={styles.presetList}>
-            {PRESETS.map(p => (
-              <button key={p.id} style={styles.presetChip} onClick={() => runPreset(p)}>
-                {p.q}
-              </button>
+          <div style={styles.cypherHead}>
+            <span>OR WRITE CYPHER DIRECTLY</span>
+            <a href={CYPHER_TUTORIAL_URL} target="_blank" rel="noopener noreferrer" style={styles.cypherLearnLink} onClick={e => { e.preventDefault(); onOpenCypherTutorial ? onOpenCypherTutorial() : openExternal(CYPHER_TUTORIAL_URL) }}>
+              Learn Cypher ↗
+            </a>
+          </div>
+          {meta?.origin === 'live' ? (
+            <>
+              <div style={styles.cypherEditorWrap}>
+                <Suspense fallback={<div style={styles.askInfo}>Loading editor…</div>}>
+                  <CypherEditor
+                    value={cypherInput}
+                    onChange={setCypherInput}
+                    onRun={runCypher}
+                    theme={theme}
+                    placeholder="MATCH (v:Venue) WHERE v.district = 'Berlin' RETURN v"
+                    readOnly={cypherRunning}
+                  />
+                </Suspense>
+              </div>
+              <div style={styles.cypherRunRow}>
+                <span style={styles.cypherHint}>⌘/Ctrl+Enter to run · read-only</span>
+                <button style={styles.askBtn} onClick={runCypher} disabled={busy || !cypherInput.trim()}>
+                  {cypherRunning ? '…' : 'Run'}
+                </button>
+              </div>
+              {cypherError && <div style={styles.askErr}>{cypherError}</div>}
+            </>
+          ) : (
+            <div style={styles.askInfo}>
+              {isLiveConfigured()
+                ? 'Live Neo4j unreachable right now — Cypher needs a live connection. Presets and English questions still work on the fallback data.'
+                : 'Connect Aura in .env to run Cypher directly — presets and English questions still work offline.'}
+            </div>
+          )}
+
+          <div style={styles.presetScroll}>
+            {presetGroups.filter(grp => grp.presets.length > 0 || (grp.verticalId && smartGenerating.has(grp.verticalId))).map(grp => (
+              <div key={grp.name}>
+                <div style={styles.presetCategoryHead}>
+                  {grp.name.toUpperCase()}
+                  {grp.verticalId && smartGenerating.has(grp.verticalId) && (
+                    <span style={styles.smartGeneratingNote}> · ✦ studying this data…</span>
+                  )}
+                </div>
+                <div style={styles.presetList}>
+                  {grp.presets.map(p => (
+                    <button key={p.id} style={styles.presetChip} onClick={() => runPreset(p)} title={p.isSmart ? 'Auto-generated from this vertical’s live data' : undefined}>
+                      {p.isSmart ? `✦ ${p.q}` : p.q}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 
@@ -813,9 +1287,31 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               <div style={styles.answerQ}>{askResult.q}</div>
               <div style={styles.answerA}>{askResult.answer}</div>
               {askResult.cypher && (
-                <pre style={styles.cypher}>{askResult.cypher}</pre>
+                <>
+                  <pre style={styles.cypher}>{askResult.cypher}</pre>
+                  <button style={styles.editCypherBtn} onClick={() => loadIntoCypherEditor(askResult.cypher!)}>
+                    Edit in Cypher editor ↑
+                  </button>
+                </>
               )}
-              <button style={styles.clearBtn} onClick={clearAsk}>clear</button>
+              <div style={styles.rateRow}>
+                <span style={styles.rateLabel}>Useful?</span>
+                <button
+                  style={{ ...styles.rateBtn, ...(askOutcome === 'positive' ? styles.rateBtnActive : {}) }}
+                  onClick={() => rateAsk('positive')}
+                  title="Good answer"
+                >
+                  👍
+                </button>
+                <button
+                  style={{ ...styles.rateBtn, ...(askOutcome === 'negative' ? styles.rateBtnActive : {}) }}
+                  onClick={() => rateAsk('negative')}
+                  title="Not useful"
+                >
+                  👎
+                </button>
+                <button style={styles.clearBtn} onClick={clearAsk}>clear</button>
+              </div>
             </div>
           )}
 
@@ -838,89 +1334,11 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               </div>
             ))}
             {browserUrl && (
-              <a style={styles.browserBtn} href={browserUrl} target="_blank" rel="noopener noreferrer" title="Open this Aura instance in Neo4j Browser">
+              <a style={styles.browserBtn} href={browserUrl} target="_blank" rel="noopener noreferrer" title="Open this Aura instance in Neo4j Browser" onClick={e => { e.preventDefault(); openExternal(browserUrl) }}>
                 Open in Neo4j Browser ↗
               </a>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Selected node card */}
-      {selected && (
-        <div style={{ ...styles.card, borderColor: nodeCol[selected.kind] }}>
-          <div style={{ ...styles.cardKind, color: nodeCol[selected.kind] }}>
-            {KIND_LABEL[selected.kind]}{selected.verified ? ' · verified' : ''}
-          </div>
-          <div style={styles.cardTitle}>{selected.label}</div>
-          {selected.sub && <div style={styles.cardSub}>{selected.sub}</div>}
-          {selected.district && <div style={styles.cardSub}>{selected.district}</div>}
-          {selected.lastShipped && <div style={styles.cardSub}>last shipped {selected.lastShipped}</div>}
-          {!!selected.apps?.length && (
-            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(127,127,127,.25)' }}>
-              <div style={{ ...styles.cardSub, letterSpacing: '.1em', textTransform: 'uppercase', fontSize: 9, opacity: .6 }}>
-                Apps · {selected.apps.length}
-              </div>
-              {selected.apps.slice(0, 8).map(a => (
-                <div key={a} style={{ ...styles.cardSub, opacity: .9 }}>{a}</div>
-              ))}
-              {selected.apps.length > 8 && (
-                <div style={{ ...styles.cardSub, opacity: .5 }}>+{selected.apps.length - 8} more</div>
-              )}
-            </div>
-          )}
-
-          {/* Action bar — only for nodes backed by a real lead */}
-          {activeLead && (
-            <div style={styles.actions}>
-              <div style={styles.actionLinks}>
-                {activeLead.website && (
-                  <a style={styles.actionBtn} href={hrefFor(activeLead.website)} target="_blank" rel="noopener noreferrer">↗ Website</a>
-                )}
-                {activeLead.email && (
-                  <a style={styles.actionBtn} href={`mailto:${activeLead.email}`}>✉ Email</a>
-                )}
-                {activeLead.phone && (
-                  <a style={styles.actionBtn} href={`tel:${activeLead.phone}`}>☎ Call</a>
-                )}
-                {activeLead.instagram && (
-                  <a style={styles.actionBtn} href={instagramHref(activeLead.instagram)} target="_blank" rel="noopener noreferrer">◎ Instagram</a>
-                )}
-              </div>
-              {onLeadStatusChange && (
-                <label style={styles.statusRow}>
-                  <span style={styles.statusLabel}>Status</span>
-                  <select
-                    style={{ ...styles.statusSelect, color: STATUS_COLOR[activeLead.status], borderColor: STATUS_COLOR[activeLead.status] + '66' }}
-                    value={activeLead.status}
-                    onChange={e => onLeadStatusChange(activeLead.id, e.target.value as OutreachStatus)}
-                  >
-                    {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                  </select>
-                </label>
-              )}
-              {onOpenLead && (
-                <button style={styles.openDetailBtn} onClick={() => onOpenLead(activeLead.id)}>
-                  Open full detail ↗
-                </button>
-              )}
-            </div>
-          )}
-
-          {neighbors.length > 0 && (
-            <div style={styles.connections}>
-              <div style={styles.connHead}>{neighbors.length} connection{neighbors.length === 1 ? '' : 's'} · click to jump</div>
-              {neighbors.map((nb, i) => (
-                <button key={i} style={styles.connRow} onClick={() => graphRef.current?.selectNodeById(nb.id)}>
-                  <span style={{ ...styles.connDot, background: nodeCol[nb.node.kind] }} />
-                  <span style={styles.connRel}>{nb.dir === 'out' ? REL_LABEL[nb.rel] : `←${REL_LABEL[nb.rel]}`}</span>
-                  <span style={styles.connName}>{nb.node.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div style={styles.cardHint}>neighbors highlighted · click empty space to release</div>
         </div>
       )}
 
@@ -958,6 +1376,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               {enriching ? 'Enriching…' : 'Enrich ✦'}
             </button>
           )}
+          {selectedIds.length === 2 && (
+            <button style={styles.bulkBtn} onClick={findPath}>Find path ↝</button>
+          )}
           <button style={styles.bulkBtn} onClick={bulkExport}>Export ↓</button>
           <button style={styles.bulkClear} onClick={clearSelection}>Clear</button>
           {bulkMsg && <span style={styles.bulkMsg}>{bulkMsg}</span>}
@@ -975,6 +1396,62 @@ function Stat({ label, value, color, s }: { label: string; value: number; color:
       <div style={{ ...s.statValue, color }}>{value}</div>
       <div style={s.statLabel}>{label}</div>
     </div>
+  )
+}
+
+// A spatial complement to the connections list below it: the selected node
+// stays fixed at center while its neighbors ring around it, each on its own
+// spoke, instead of every business name competing for the same packed patch
+// of 3D space. Capped to the first 8 — the full set is still in the list.
+function truncateLabel(s: string, max = 13): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
+function NeighborFan({
+  centerLabel, centerColor, neighbors, nodeCol, relCol, onJump, textColor, bgColor,
+}: {
+  centerLabel: string; centerColor: string; neighbors: Neighbor[]
+  nodeCol: Record<GraphNode['kind'], string>; relCol: Record<GraphLink['kind'], string>
+  onJump: (id: string) => void; textColor: string; bgColor: string
+}) {
+  const size = 216
+  const cx = size / 2
+  const cy = size / 2
+  const r = 78
+  const shown = neighbors.slice(0, 8)
+  return (
+    <svg width="100%" viewBox={`0 0 ${size} ${size}`} style={{ display: 'block', overflow: 'visible' }}>
+      {shown.map((nb, i) => {
+        const angle = (2 * Math.PI * i) / shown.length - Math.PI / 2
+        const x = cx + r * Math.cos(angle)
+        const y = cy + r * Math.sin(angle)
+        const onRight = x >= cx
+        return (
+          // Keyed by index, not nb.id: two different-kind edges to the same
+          // neighbor would otherwise produce duplicate ids and React could
+          // keep a stale click handler on the wrong spoke.
+          <g key={i} style={{ cursor: 'pointer' }} onClick={() => onJump(nb.id)}>
+            <title>{nb.node.label}</title>
+            <line x1={cx} y1={cy} x2={x} y2={y} stroke={relCol[nb.rel]} strokeWidth={1} opacity={0.55} />
+            <circle cx={x} cy={y} r={5} fill={nodeCol[nb.node.kind]} stroke={bgColor} strokeWidth={1.5} />
+            <text
+              x={x + (onRight ? 8 : -8)} y={y}
+              textAnchor={onRight ? 'start' : 'end'} dominantBaseline="middle"
+              fontFamily="'DM Mono', monospace" fontSize={9} fill={textColor}
+            >
+              {truncateLabel(nb.node.label)}
+            </text>
+          </g>
+        )
+      })}
+      <circle cx={cx} cy={cy} r={8} fill={centerColor} stroke={bgColor} strokeWidth={2} />
+      <text
+        x={cx} y={cy + 20} textAnchor="middle"
+        fontFamily="'DM Mono', monospace" fontSize={9} fontWeight={700} fill={textColor}
+      >
+        {truncateLabel(centerLabel, 20)}
+      </text>
+    </svg>
   )
 }
 
@@ -1006,6 +1483,20 @@ function makeStyles(mode: ThemeMode): Styles {
   return {
     overlay: { position: 'fixed', inset: 0, zIndex: 1000, background: t.overlayBg, overflow: 'hidden' },
     canvas: { position: 'absolute', inset: 0 },
+    popoutContainer: {
+      position: 'absolute', left: 0, top: 0, width: 0, height: 0,
+      zIndex: 4, pointerEvents: 'none', willChange: 'transform',
+    },
+    popoutChip: {
+      position: 'absolute', left: 0, top: 0, pointerEvents: 'auto',
+      display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+      background: t.card, border: '1px solid', borderRadius: 6,
+      padding: '6px 10px', fontFamily: mono, fontSize: 11, color: t.text2,
+      boxShadow: mode === 'dark' ? '0 6px 20px #000a' : '0 4px 14px rgba(32,30,24,.16)',
+    },
+    popoutChipDot: { width: 6, height: 6, borderRadius: '50%', flexShrink: 0 },
+    popoutChipLabel: { fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', color: t.faint },
+    popoutChipValue: { color: t.text, fontWeight: 600 },
     hudTop: {
       position: 'absolute', top: 0, left: 0, right: 0, height: 52, display: 'flex', alignItems: 'center',
       gap: 14, padding: '0 20px', zIndex: 2, background: t.topGrad, color: t.text, fontFamily: mono,
@@ -1058,6 +1549,21 @@ function makeStyles(mode: ThemeMode): Styles {
       width: 34, background: t.btn, border: `1px solid ${t.accentDim}`, borderRadius: 4,
       color: t.accent, cursor: 'pointer', fontSize: 14,
     },
+    cypherHead: {
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14,
+      fontSize: 9, letterSpacing: '.14em', color: t.faint,
+    },
+    cypherLearnLink: { color: t.accent, fontSize: 9, letterSpacing: '.06em', textDecoration: 'none' },
+    cypherEditorWrap: {
+      marginTop: 6, border: `1px solid ${t.border}`, borderRadius: 4, overflow: 'hidden',
+      background: t.solid, minHeight: 70,
+    },
+    cypherRunRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, gap: 8 },
+    cypherHint: { fontSize: 9.5, color: t.faint, fontFamily: mono },
+    editCypherBtn: {
+      marginTop: 6, background: 'transparent', border: `1px solid ${t.accentDim}`, borderRadius: 4,
+      color: t.accent, cursor: 'pointer', fontSize: 10, padding: '4px 9px', fontFamily: mono,
+    },
     filterChips: { display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     chip: {
       display: 'inline-flex', alignItems: 'center', gap: 6, background: t.btn,
@@ -1066,7 +1572,10 @@ function makeStyles(mode: ThemeMode): Styles {
     },
     chipDot: { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 },
     filterDivider: { borderTop: `1px solid ${t.border}`, margin: '12px 0' },
-    presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10 },
+    presetScroll: { maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 },
+    presetCategoryHead: { fontSize: 9, letterSpacing: '.16em', color: t.faint, marginTop: 6 },
+    smartGeneratingNote: { fontSize: 9, letterSpacing: 'normal', textTransform: 'none' as const, color: t.muted },
+    presetList: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 },
     presetChip: {
       textAlign: 'left', background: t.btn, border: `1px solid ${t.border}`, borderRadius: 4,
       padding: '7px 9px', color: t.text2, cursor: 'pointer', fontSize: 11, lineHeight: 1.35, fontFamily: mono,
@@ -1088,9 +1597,16 @@ function makeStyles(mode: ThemeMode): Styles {
       whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflowY: 'auto',
     },
     clearBtn: {
-      marginTop: 8, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4,
+      background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4,
       color: t.muted, cursor: 'pointer', fontSize: 10, padding: '4px 10px', fontFamily: mono,
     },
+    rateRow: { marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 },
+    rateLabel: { fontSize: 10, color: t.faint, marginRight: 2 },
+    rateBtn: {
+      background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4,
+      cursor: 'pointer', fontSize: 12, padding: '3px 7px', lineHeight: 1, opacity: 0.6,
+    },
+    rateBtnActive: { opacity: 1, borderColor: t.accent, background: t.accentDim },
     legend: {
       position: 'absolute', left: 20, bottom: 20, zIndex: 2, display: 'flex', flexDirection: 'column', gap: 6,
       background: t.legend, border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 12px',
@@ -1111,8 +1627,12 @@ function makeStyles(mode: ThemeMode): Styles {
       color: '#34d399', fontFamily: mono, fontSize: 10.5, cursor: 'pointer',
     },
 
+    rightRail: {
+      position: 'absolute', right: 20, top: 64, bottom: 20, zIndex: 3, width: 248,
+      display: 'flex', flexDirection: 'column', gap: 12, pointerEvents: 'none',
+    },
     stats: {
-      position: 'absolute', right: 20, top: 64, zIndex: 3, width: 230,
+      flexShrink: 0, pointerEvents: 'auto',
       background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8, padding: 14,
       fontFamily: mono, color: t.text, boxShadow: t.shadow,
     },
@@ -1131,10 +1651,10 @@ function makeStyles(mode: ThemeMode): Styles {
     },
 
     card: {
-      position: 'absolute', right: 20, bottom: 20, zIndex: 2, width: 248,
-      maxHeight: 'calc(100vh - 320px)', overflowY: 'auto',
-      background: t.card, border: '1px solid', borderRadius: 8, padding: '14px 16px',
+      flex: '1 1 auto', minHeight: 0, overflowY: 'auto', pointerEvents: 'auto',
+      background: t.card, border: '1px solid', borderRadius: 10, padding: '14px 16px',
       fontFamily: mono, color: t.text,
+      boxShadow: mode === 'dark' ? '0 20px 60px #000a, 0 0 0 1px #ffffff0d' : '0 16px 40px rgba(32,30,24,.18), 0 0 0 1px #ffffff80',
     },
     actions: { marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 },
     actionLinks: { display: 'flex', flexWrap: 'wrap', gap: 6 },
@@ -1149,8 +1669,9 @@ function makeStyles(mode: ThemeMode): Styles {
       fontFamily: mono, fontSize: 11, cursor: 'pointer', outline: 'none',
     },
     openDetailBtn: {
-      width: '100%', background: t.btn, border: `1px solid ${t.accentDim}`, borderRadius: 4,
-      padding: '7px 9px', color: t.accent, fontFamily: mono, fontSize: 11, cursor: 'pointer',
+      width: '100%', background: t.accent, border: `1px solid ${t.accent}`, borderRadius: 4,
+      padding: '9px 9px', color: t.solid, fontFamily: mono, fontSize: 11.5, fontWeight: 700,
+      letterSpacing: '.02em', cursor: 'pointer', boxShadow: mode === 'dark' ? t.brandGlow : 'none',
     },
     connections: { marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 10 },
     connHead: { fontSize: 9, letterSpacing: '.1em', color: t.faint, marginBottom: 6 },

@@ -1,7 +1,9 @@
 // Orbit graph model — mirrors the Neo4j schema in VOD-NEO4J-BUILD-PLAN.md §3.
 // Nodes: Venue, Contact, Source, Sequence
 // Edges: WORKS_AT (Contact→Venue), VERIFIED_BY (Contact→Source),
-//        ENROLLED_IN (Contact→Sequence), TARGETS (Sequence→Venue)
+//        ENROLLED_IN (Contact→Sequence), TARGETS (Sequence→Venue),
+//        COLLEAGUE_OF (Contact→Contact, LinkedIn vertical only — two imported
+//        connections sharing a WORKS_AT company, see linkedinImport.ts)
 
 export type NodeKind = 'venue' | 'contact' | 'source' | 'sequence'
 
@@ -17,9 +19,10 @@ export interface GraphNode {
   verticalId?: string // venue/contact only — the lead's vertical, drives the vertical filter chips
   apps?: string[] // App Store publishers — titles they have shipped
   lastShipped?: string // App Store publishers — date of their most recent release
+  linkedinUrl?: string // contacts only — set by linkedinImport.ts, opens the real profile
 }
 
-export type LinkKind = 'WORKS_AT' | 'VERIFIED_BY' | 'ENROLLED_IN' | 'TARGETS'
+export type LinkKind = 'WORKS_AT' | 'VERIFIED_BY' | 'ENROLLED_IN' | 'TARGETS' | 'COLLEAGUE_OF'
 
 export interface GraphLink {
   source: string
