@@ -38,18 +38,21 @@ const LINK_COLOR: Record<GraphLink['kind'], string> = {
   VERIFIED_BY: '#f97316',
   ENROLLED_IN: '#34d399',
   TARGETS: '#22d3ee',
+  COLLEAGUE_OF: '#3b9eff',
 }
 const LINK_DIM: Record<GraphLink['kind'], string> = {
   WORKS_AT: '#39465a',
   VERIFIED_BY: '#5c3a1e',
   ENROLLED_IN: '#204a3b',
   TARGETS: '#1f4552',
+  COLLEAGUE_OF: '#1a3a5c',
 }
 const REL_LABEL: Record<GraphLink['kind'], string> = {
   WORKS_AT: 'works at',
   VERIFIED_BY: 'verified by',
   ENROLLED_IN: 'enrolled in',
   TARGETS: 'targets',
+  COLLEAGUE_OF: 'colleague of',
 }
 
 const DIM = '#1f2937'
@@ -61,10 +64,10 @@ const KIND_COLOR_LIGHT: Record<GraphNode['kind'], string> = {
   venue: '#2f7d84', contact: '#6a5aa6', source: '#b5622a', sequence: '#4d7a46',
 }
 const LINK_COLOR_LIGHT: Record<GraphLink['kind'], string> = {
-  WORKS_AT: '#6b6659', VERIFIED_BY: '#b5622a', ENROLLED_IN: '#4d7a46', TARGETS: '#2f7d84',
+  WORKS_AT: '#6b6659', VERIFIED_BY: '#b5622a', ENROLLED_IN: '#4d7a46', TARGETS: '#2f7d84', COLLEAGUE_OF: '#6a5aa6',
 }
 const LINK_DIM_LIGHT: Record<GraphLink['kind'], string> = {
-  WORKS_AT: '#c3bba6', VERIFIED_BY: '#d8b48f', ENROLLED_IN: '#a9c2a0', TARGETS: '#9ec6cb',
+  WORKS_AT: '#c3bba6', VERIFIED_BY: '#d8b48f', ENROLLED_IN: '#a9c2a0', TARGETS: '#9ec6cb', COLLEAGUE_OF: '#c9c0dd',
 }
 
 interface CanvasTheme {
@@ -165,7 +168,11 @@ function buildPopoutChips(node: GraphNode): PopoutChip[] {
   const candidates: (PopoutChip | null)[] = [
     node.district ? { label: 'District', value: node.district } : null,
     node.verified ? { label: 'Verified', value: '✓' } : null,
-    node.website ? { label: 'Website', value: '↗ open', onClick: () => openExternal(hrefFor(node.website!)) } : null,
+    node.website
+      ? { label: 'Website', value: '↗ open', onClick: () => openExternal(hrefFor(node.website!)) }
+      : node.linkedinUrl
+        ? { label: 'LinkedIn', value: '↗ open', onClick: () => openExternal(hrefFor(node.linkedinUrl!)) }
+        : null,
     node.apps?.length ? { label: 'Apps', value: String(node.apps.length) } : null,
     node.lastShipped ? { label: 'Shipped', value: node.lastShipped } : null,
   ]

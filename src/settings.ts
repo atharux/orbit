@@ -7,6 +7,18 @@ export interface AppSettings {
   autoEnrich: boolean // auto-fill email/phone/website for newly added leads
   autoAdvance: boolean // bump status new -> ready when a lead gains an email
   autoEnrollSeqId: string // sequence id to auto-enroll newly-reachable leads into ('' = off)
+  // Neo4j Aura connection, entered here rather than baked into a build. This is
+  // what lets a packaged/distributed Tauri build reach a live Aura instance:
+  // .env.production is deliberately committed blank (see linkedinImport.ts /
+  // src-tauri notes) so credentials never ship inside a binary someone else
+  // might receive -- each install's user pastes their own here instead, and it
+  // stays in this device's localStorage only. VITE_NEO4J_* still seeds these
+  // defaults for local `npm run dev`, where the env var is on your machine only.
+  neo4jUri: string
+  neo4jUsername: string
+  neo4jPassword: string
+  neo4jDatabase: string
+  neo4jInstanceName: string
 }
 
 // Fallback list, verified against OpenRouter's live catalogue on 2026-07-30.
@@ -51,6 +63,11 @@ const DEFAULTS: AppSettings = {
   autoEnrich: true,
   autoAdvance: true,
   autoEnrollSeqId: '',
+  neo4jUri: import.meta.env.VITE_NEO4J_URI ?? '',
+  neo4jUsername: import.meta.env.VITE_NEO4J_USERNAME ?? '',
+  neo4jPassword: import.meta.env.VITE_NEO4J_PASSWORD ?? '',
+  neo4jDatabase: import.meta.env.VITE_NEO4J_DATABASE ?? '',
+  neo4jInstanceName: import.meta.env.VITE_NEO4J_INSTANCE_NAME ?? '',
 }
 
 export function loadSettings(): AppSettings {

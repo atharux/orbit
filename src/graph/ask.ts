@@ -578,17 +578,22 @@ export function findShortestPath(g: GraphData, fromId: string, toId: string): As
 // --- live free-text engine (NL -> Cypher -> Aura) ---------------------------
 
 const SCHEMA_PROMPT = `You write a single read-only Cypher query for a Neo4j graph.
-The :Venue label represents a business/company (this dataset is trades businesses),
-so map "business", "company", or "trade" in the question to the :Venue label.
+The :Venue label represents a business/company — most verticals are trades
+businesses, but the "linkedin" vertical_id is a personal LinkedIn network:
+its Venue nodes are the imported contacts' employers, and its Contact nodes
+carry linkedin_url/linkedin_industry/linkedin_location. Map "business",
+"company", "trade", or "employer" in the question to :Venue; map "connection"
+or "colleague" to :Contact.
 Schema:
-  (:Venue {name, category, district})
-  (:Contact {name, title, role, verified})
+  (:Venue {name, category, district, vertical_id, website})
+  (:Contact {name, title, role, verified, vertical_id, linkedin_url, linkedin_industry, linkedin_location})
   (:Source {name})
   (:Sequence {name, status})
   (:Contact)-[:WORKS_AT]->(:Venue)
   (:Contact)-[:VERIFIED_BY]->(:Source)
   (:Contact)-[:ENROLLED_IN]->(:Sequence)
   (:Sequence)-[:TARGETS]->(:Venue)
+  (:Contact)-[:COLLEAGUE_OF]->(:Contact)  — two LinkedIn contacts sharing a Venue via WORKS_AT
 Rules:
 - READ ONLY. Never CREATE/MERGE/SET/DELETE/REMOVE/CALL {}/LOAD.
 - Always RETURN the node(s) the question is about (not just counts) so they can be highlighted.

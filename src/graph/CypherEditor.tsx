@@ -14,12 +14,12 @@ import '@neo4j-cypher/codemirror/css/cypher-codemirror.css'
 // generic Cypher keyword completion.
 export const ORBIT_CYPHER_SCHEMA = {
   labels: ['Venue', 'Contact', 'Source', 'Sequence'],
-  relationshipTypes: ['WORKS_AT', 'VERIFIED_BY', 'ENROLLED_IN', 'TARGETS'],
+  relationshipTypes: ['WORKS_AT', 'VERIFIED_BY', 'ENROLLED_IN', 'TARGETS', 'COLLEAGUE_OF'],
   propertyKeys: [
     'venue_id', 'contact_id', 'sequence_id', 'name', 'category', 'district',
     'title', 'role', 'verified', 'status', 'website', 'email', 'phone',
     'vertical_id', 'apps', 'last_shipped', 'linkedin_url', 'linkedin_industry',
-    'linkedin_location', 'imported_at', 'updated_at', 'lead_json',
+    'linkedin_location', 'imported_at', 'updated_at', 'lead_json', 'source',
   ],
 }
 
@@ -42,7 +42,13 @@ export default function CypherEditor({
 
   useEffect(() => {
     if (!hostRef.current) return
-    const api = createCypherEditor(hostRef.current, {
+    // createCypherEditor's own .d.ts claims this returns EditorApi directly,
+    // but the installed 1.0.3 build actually returns { editor: EditorApi } --
+    // confirmed by reading node_modules/@neo4j-cypher/codemirror/es/codemirror.js.
+    // Trusting the (wrong) type crashed every mount with "api.onValueChanged
+    // is not a function", with no error boundary catching it -- blanking the
+    // entire page the instant a live Aura connection made this component render.
+    const { editor: api } = (createCypherEditor(hostRef.current, {
       value,
       schema: ORBIT_CYPHER_SCHEMA,
       theme,
@@ -61,9 +67,9 @@ export default function CypherEditor({
       preExtensions: [
         Prec.highest(keymap.of([{ key: 'Mod-Enter', run: () => { onRunRef.current(); return true } }])),
       ],
-    })
+    }) as unknown as { editor: EditorApi })
     apiRef.current = api
-    const off = api.onValueChanged(v => onChange(v))
+    const off = api.onValueChanged((v: string) => onChange(v))
     return () => { off(); api.destroy() }
     // Mount once; value/theme/readOnly are pushed via imperative setters below
     // so typing doesn't get fought by a controlled-value re-render loop.
