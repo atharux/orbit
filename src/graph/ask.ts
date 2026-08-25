@@ -382,6 +382,50 @@ export const PRESETS: Preset[] = [
 export function verticalPresets(v: Vertical): Preset[] {
   const inVertical = (n: { verticalId?: string }) => n.verticalId === v.id
 
+  // LinkedIn Connections never creates Venue nodes — linkedinImport.ts only
+  // ever tags Contact nodes with vertical_id 'linkedin' (WORKS_AT links to an
+  // existing Venue only on an exact name match; no Venue is ever minted). The
+  // generic company-scoped presets below would silently return "Every ...
+  // company has ..." over zero companies — read as full coverage rather than
+  // "there are no companies here at all" — so this vertical gets its own
+  // contact-scoped presets instead.
+  if (v.id === 'linkedin') {
+    return [
+      {
+        id: 'v-linkedin-unverified',
+        q: 'LinkedIn connections not yet verified',
+        category: v.name,
+        verticalId: v.id,
+        run: g => {
+          const hits = nodesOfKind(g, 'contact').filter(inVertical).filter(c => !c.verified)
+          return {
+            answer: hits.length
+              ? `${hits.length} LinkedIn ${hits.length === 1 ? 'connection is' : 'connections are'} not yet verified.`
+              : 'Every imported LinkedIn connection is verified.',
+            nodeIds: hits.map(c => c.id),
+          }
+        },
+      },
+      {
+        id: 'v-linkedin-matched-company',
+        q: 'LinkedIn connections matched to an existing company',
+        category: v.name,
+        verticalId: v.id,
+        run: g => {
+          const linked = new Set(linksOfKind(g, 'WORKS_AT').map(l => l.source))
+          const contacts = nodesOfKind(g, 'contact').filter(inVertical)
+          const hits = contacts.filter(c => linked.has(c.id))
+          return {
+            answer: contacts.length
+              ? `${hits.length} of ${contacts.length} LinkedIn ${contacts.length === 1 ? 'connection' : 'connections'} matched to an existing company by name.`
+              : 'No LinkedIn connections imported yet.',
+            nodeIds: hits.map(c => c.id),
+          }
+        },
+      },
+    ]
+  }
+
   const presets: Preset[] = [
     {
       id: `v-${v.id}-no-verified`,
