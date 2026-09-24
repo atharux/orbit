@@ -512,6 +512,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           }]))
           tweenTo(targets, 600, () => {
             releasePins(nodes)
+            // A 2D simulation never applies fz, so the tween alone can leave
+            // every z at 0 — and d3 only seeds z when it's missing. Write the
+            // lifted z onto the nodes themselves before going back to 3D.
+            for (const n of nodes) { n.z = targets.get(n.id)?.z ?? n.z; n.vz = 0 }
             if (Graph.numDimensions() !== 3) Graph.numDimensions(3)
             else Graph.d3ReheatSimulation()
             fitLater(1200)
