@@ -541,8 +541,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       }
 
       function fitLater(ms: number) {
-        if (layoutFitTimer !== null) window.clearTimeout(layoutFitTimer)
-        layoutFitTimer = window.setTimeout(() => { layoutFitTimer = null; if (!disposed) fitView(700) }, ms)
+        if (userHasCamera) return
+        clearFitTimer()
+        layoutFitTimer = window.setTimeout(() => { layoutFitTimer = null; if (!disposed && !userHasCamera) fitView(700) }, ms)
       }
 
       // Frame what's on screen. The library's zoomToFit frames a head-on flat
@@ -578,8 +579,18 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       // Any pending auto-fit (initial load, after a layout lands) must not
       // fire once the user has taken over the camera — that was "click a node
       // and it zooms out of view": the fit fired after the click's fly-in.
-      function cancelAutoFit() {
+      //
+      // A timer alone isn't enough: after a layout change the fit is only
+      // scheduled once the tween lands, so a click mid-tween had nothing to
+      // cancel. The flag is checked when the fit is scheduled and when it
+      // fires; choosing a layout clears it (that choice asks for a fit).
+      let userHasCamera = false
+      function clearFitTimer() {
         if (layoutFitTimer !== null) { window.clearTimeout(layoutFitTimer); layoutFitTimer = null }
+      }
+      function cancelAutoFit() {
+        userHasCamera = true
+        clearFitTimer()
       }
       controls.addEventListener('start', cancelAutoFit)
 
@@ -630,6 +641,11 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       }
 
       const sceneFits = (next: LayoutMode, size: number) => !(next === 'circular' && size > CIRCULAR_MAX)
+      // The scene a layout would arrange: the selection (2+ nodes) for a
+      // fixed layout, else the whole graph. One rule for applyLayout and
+      // rescope — a 1-node focus is not a scene.
+      const sceneSizeFor = (next: LayoutMode) =>
+        isPinned(next) && highlightNodes.size > 1 ? highlightNodes.size : Graph.graphData().nodes.length
 
       // Returns false when the layout would be unreadable and was not applied.
       function applyLayout(next: LayoutMode): boolean {
@@ -638,14 +654,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         // A ring stops being readable past ~200 nodes (a few px per node).
         // Circular lays out a scene that size or smaller — a selection, or a
         // small graph — and says why otherwise instead of drawing mush.
-        const sceneSize = isPinned(next) && highlightNodes.size > 1 ? highlightNodes.size : nodes.length
+        const sceneSize = sceneSizeFor(next)
         if (!sceneFits(next, sceneSize)) {
           setLayoutNotice(`Circular is readable up to ${CIRCULAR_MAX} nodes — this scene has ${sceneSize}. Click a node, run a preset or filter to pick a smaller scene, then choose Circular.`)
           return false
         }
         setLayoutNotice('')
         releaseHeld()
-        cancelAutoFit()
+        clearFitTimer()
+        userHasCamera = false
         const prev = layout
         layout = next
         clearPopout()
@@ -716,12 +733,13 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       // current layout can't take the whole graph, fall back to Force 2D so
       // the view stays flat and head-on.
       function relayoutAll() {
-        rescope(Graph.graphData().nodes.length)
+        rescope()
       }
-      // Re-apply the current layout to a new scene of `size` nodes, falling
-      // back to Force 2D (quietly — nothing to explain) when it won't fit.
-      function rescope(size: number) {
-        const target: LayoutMode = sceneFits(layout, size) ? layout : 'force2d'
+      // Re-apply the current layout to the current scene (see sceneSizeFor),
+      // falling back to Force 2D — quietly, nothing to explain — when it
+      // won't fit.
+      function rescope() {
+        const target: LayoutMode = sceneFits(layout, sceneSizeFor(layout)) ? layout : 'force2d'
         applyLayout(target)
         syncLayout(target)
       }
@@ -837,6 +855,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       }
       function toggleSelect(id: string) {
         cancelAutoFit()
+        releaseHeld()
         multiSel.has(id) ? multiSel.delete(id) : multiSel.add(id)
         setSelected(null)
         clearPopout()
@@ -900,6 +919,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       // Imperative handle for the ask panel: light up an arbitrary node set.
       function focusNodes(ids: string[]) {
+        releaseHeld()
         highlightNodes.clear()
         highlightLinks.clear()
         multiSel.clear()
@@ -923,7 +943,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         // A preset/filter result IS a selection you can act on in bulk.
         setSelectedIds([...ids])
         // Already looking at a selection-scoped layout? Re-scope it to the new set.
-        if (subsetIds) rescope(ids.length)
+        if (subsetIds) rescope()
       }
 
       // Select a node by id (used by the connections list to navigate).
