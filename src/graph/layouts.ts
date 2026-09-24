@@ -9,8 +9,8 @@ export type LayoutMode = 'force3d' | 'force2d' | 'circular' | 'tiers'
 export const LAYOUTS: { mode: LayoutMode; label: string; hint: string }[] = [
   { mode: 'force3d', label: 'Force 3D', hint: 'Free-floating 3D simulation (default)' },
   { mode: 'force2d', label: 'Force 2D', hint: 'Same simulation, flattened onto a plane, viewed head-on' },
-  { mode: 'circular', label: 'Circular', hint: 'One ring, nodes grouped by type, so cross-group edges read at a glance' },
-  { mode: 'tiers', label: 'Hierarchical', hint: 'One column per type: Source ← Contact → Company ← Sequence' },
+  { mode: 'circular', label: 'Circular', hint: 'One ring grouped by type, for scenes up to 200 nodes. With a selection, lays out just the selection' },
+  { mode: 'tiers', label: 'Hierarchical', hint: 'One column per type: Source ← Contact → Company ← Sequence. With a selection, lays out just the selection' },
 ]
 
 // A layout is "flat" when it lives on the z = 0 plane and is viewed head-on.
