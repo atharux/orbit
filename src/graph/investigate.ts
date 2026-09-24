@@ -44,7 +44,8 @@ type Turn =
   | { action: 'conclude'; finding: string; confidence: Finding['confidence']; evidence_ids: string[] }
 
 const MIN_QUERIES = 2 // a conclusion needs its result checked at least once
-const MAX_ROWS_SHOWN = 20
+const MAX_ROWS_SHOWN = 20 // rows the model sees
+const MAX_ROWS_KEPT = 100 // rows kept at all (ids, evidence), whatever the query returned
 const MAX_STR = 80
 // elementId format on Neo4j 5: "<db>:<uuid>:<n>"
 const ELEMENT_ID_RE = /^\d+:[0-9a-f-]{36}:\d+$/i
@@ -115,18 +116,13 @@ async function pickRoute(): Promise<'mcp' | 'driver'> {
   return (await isMcpAvailable()) ? 'mcp' : 'driver'
 }
 
-async function runQuery(cypher: string, via: 'mcp' | 'driver'): Promise<{ rows: Record<string, any>[]; nodeIds: string[] }> {
+async function runQuery(cypher: string, via: 'mcp' | 'driver'): Promise<Record<string, any>[]> {
   if (via === 'mcp') {
     const out = await callMcpTool('read_neo4j_cypher', { query: cypher })
     if (!Array.isArray(out)) throw new Error(typeof out === 'string' ? out : 'MCP returned no rows')
-    const ids = new Set<string>()
-    collectIds(out, ids)
-    return { rows: out, nodeIds: [...ids] }
+    return out
   }
-  const { rows, nodeIds } = await runProbe(cypher)
-  const ids = new Set(nodeIds) // returned Node values…
-  collectIds(rows, ids) // …plus explicit elementId(n) AS id columns
-  return { rows, nodeIds: [...ids] }
+  return runProbe(cypher) // Node values arrive with their elementId as `id`
 }
 
 export async function investigate(
@@ -140,6 +136,7 @@ export async function investigate(
   },
 ): Promise<Investigation> {
   const maxSteps = opts.maxSteps ?? 6
+  const signal = opts.signal
   const messages: AIMessage[] = [
     { role: 'system', content: systemPrompt(maxSteps) },
     { role: 'user', content: `Question: ${question}` },
@@ -152,12 +149,16 @@ export async function investigate(
     ({ question, steps, finding, stoppedBecause, error })
 
   try {
-    for (let turn = 0; turn <= maxSteps; turn++) {
-      if (opts.signal?.aborted) return done('cancelled', null)
+    // The budget is queries, not model turns: the one-time pushback below
+    // costs a turn but no query, and the model is always owed a final
+    // conclude turn once its queries run out. maxSteps + 2 turns covers both.
+    for (let turn = 0; turn < maxSteps + 2; turn++) {
+      if (signal?.aborted) return done('cancelled', null)
       const { value, model: used } = await generateParsed(
-        { apiKey: opts.apiKey, model, messages, appTitle: 'Orbit', temperature: 0.2 },
+        { apiKey: opts.apiKey, model, messages, appTitle: 'Orbit', temperature: 0.2, signal },
         parseTurn,
       )
+      if (signal?.aborted) return done('cancelled', null)
       model = used // stick with a model that is answering in-protocol
       messages.push({ role: 'assistant', content: JSON.stringify(value) })
 
@@ -165,7 +166,7 @@ export async function investigate(
       // tries to conclude off a single result, send it back to check the
       // result another way — a different definition, a sanity count, the
       // alternative explanation. (Only once, and only while queries remain.)
-      if (value.action === 'conclude' && steps.length < MIN_QUERIES && !pushedBack && turn < maxSteps) {
+      if (value.action === 'conclude' && steps.length < MIN_QUERIES && !pushedBack && steps.length < maxSteps) {
         pushedBack = true
         messages.push({
           role: 'user',
@@ -181,7 +182,7 @@ export async function investigate(
           nodeIds: value.evidence_ids.filter(id => seen.has(id)), // never cite what wasn't observed
         })
       }
-      if (turn === maxSteps) break // out of queries and still not concluding
+      if (steps.length >= maxSteps) break // told it had no queries left, and it still didn't conclude
 
       const step: InvestigationStep = {
         n: steps.length + 1, hypothesis: value.hypothesis, cypher: value.cypher,
@@ -194,12 +195,19 @@ export async function investigate(
       } else {
         try {
           step.via = await pickRoute()
-          const r = await runQuery(value.cypher, step.via)
-          step.rows = r.rows.length
-          step.nodeIds = r.nodeIds
-          step.preview = renderRows(r.rows)
-          r.nodeIds.forEach(id => seen.add(id))
+          const all = await runQuery(value.cypher, step.via)
+          if (signal?.aborted) return done('cancelled', null)
+          // The prompt asks for LIMIT 25; this enforces a ceiling regardless,
+          // so an unbounded query can't flood the canvas or the citable ids.
+          const rows = all.slice(0, MAX_ROWS_KEPT)
+          const ids = new Set<string>()
+          collectIds(rows, ids)
+          step.rows = all.length
+          step.nodeIds = [...ids]
+          step.preview = renderRows(rows) + (all.length > MAX_ROWS_KEPT ? `\n(query returned ${all.length} rows; only the first ${MAX_ROWS_KEPT} were kept — add a LIMIT)` : '')
+          ids.forEach(id => seen.add(id))
         } catch (e: any) {
+          if (signal?.aborted) return done('cancelled', null)
           step.error = String(e?.message ?? e).split('\n')[0].slice(0, 300)
           step.preview = `Query failed: ${step.error}`
         }
@@ -216,6 +224,7 @@ export async function investigate(
     }
     return done('step-cap', null)
   } catch (e: any) {
+    if (signal?.aborted) return done('cancelled', null)
     return done('error', null, String(e?.message ?? e))
   }
 }

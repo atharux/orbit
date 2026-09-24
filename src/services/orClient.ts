@@ -121,6 +121,8 @@ export interface CallOptions {
   queueCap?: number;
   siteUrl?: string;
   appTitle?: string;
+  /** Aborts the in-flight request and stops trying further models. */
+  signal?: AbortSignal;
 }
 
 /** Raw text call. Tries preferred model then live free fallbacks; advances on 429/unavailable. */
@@ -155,6 +157,7 @@ export async function callOpenRouter(opts: CallOptions): Promise<{ text: string;
           max_tokens: opts.maxTokens ?? 3000,
           temperature: opts.temperature,
         }),
+        signal: opts.signal,
       });
 
       if (res.ok) {
@@ -238,10 +241,14 @@ export async function generateParsed<T>(
   const queue = await modelQueue(opts);
   let lastErr: unknown;
   for (const model of queue) {
+    if (opts.signal?.aborted) throw new Error('Cancelled');
     try {
-      const { text } = await callOpenRouter({ ...opts, model, queueCap: 1 });
-      return { value: parse(text), model };
+      // callOpenRouter may substitute a model (e.g. a deprioritised one), so
+      // report the one that actually answered.
+      const { text, model: used } = await callOpenRouter({ ...opts, model, queueCap: 1 });
+      return { value: parse(text), model: used };
     } catch (err) {
+      if (opts.signal?.aborted) throw err; // cancelled — don't move on to the next model
       lastErr = err;
     }
   }

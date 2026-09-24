@@ -272,6 +272,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // Multi-step investigation (investigate.ts): the trail streams in step by step.
   const [investigation, setInvestigation] = useState<(Investigation & { running: boolean }) | null>(null)
   const investigateAbort = useRef<AbortController | null>(null)
+  // Closing the overlay mid-investigation stops it — otherwise it keeps
+  // spending the user's OpenRouter key and Aura reads in the background.
+  useEffect(() => () => investigateAbort.current?.abort(), [])
   const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
   const canAskLocal = !canAskLive && localAvailable(openRouterApiKey, graphData)
