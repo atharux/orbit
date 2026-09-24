@@ -1,5 +1,5 @@
 import neo4j from 'neo4j-driver-lite'
-import type { GraphData, GraphNode, GraphLink, NodeKind, LinkKind } from './types'
+import type { GraphData, GraphNode, GraphLink, GraphScope, NodeKind, LinkKind } from './types'
 import { loadSettings } from '../settings'
 
 // Live read from Neo4j Aura. Credentials come from Settings (localStorage,
@@ -71,7 +71,43 @@ const LABEL_TO_KIND: Record<string, NodeKind> = {
   Venue: 'venue', Contact: 'contact', Source: 'source', Sequence: 'sequence',
 }
 
+// Hydra's Modus labels. Matched only together with :Modus — the instance also
+// holds an unrelated LinkedIn-shaped dataset that has its own bare :Company.
+const MODUS_LABEL_TO_KIND: Record<string, NodeKind> = {
+  Company: 'employer', Role: 'role', Project: 'project', Skill: 'skill',
+  Achievement: 'achievement', Artifact: 'artifact', Education: 'education',
+}
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+
+function modusToGraphNode(n: any): GraphNode | null {
+  const label = (n.labels as string[]).find(l => l in MODUS_LABEL_TO_KIND)
+  if (!label) return null
+  const kind = MODUS_LABEL_TO_KIND[label]
+  const p = n.properties ?? {}
+  const text = (v: unknown) => (v === null || v === undefined || v === '' ? undefined : String(v))
+  const sub: Record<string, string | undefined> = {
+    employer: text(p.industry),
+    role: [text(p.seniority), p.is_current ? 'current' : text(p.start_date)].filter(Boolean).join(' · ') || undefined,
+    project: text(p.start_date),
+    skill: [text(p.category), text(p.level)].filter(Boolean).join(' · ') || undefined,
+    achievement: text(p.metric),
+    artifact: text(p.kind),
+    education: [text(p.degree), text(p.field)].filter(Boolean).join(' · ') || undefined,
+  }
+  return {
+    id: n.elementId,
+    kind,
+    // Achievements are sentences — clip them so the on-canvas label stays a label.
+    label: clip(String(p.name ?? p.title ?? p.statement ?? p.institution ?? p.key ?? kind), 60),
+    sub: sub[kind],
+    verified: typeof p.verified === 'boolean' ? p.verified : undefined,
+    sourceUrl: text(p.source_url) ?? text(p.url),
+  }
+}
+
 function nodeToGraphNode(n: any): GraphNode | null {
+  if ((n.labels as string[]).includes('Modus')) return modusToGraphNode(n)
   const label = (n.labels as string[]).find(l => l in LABEL_TO_KIND)
   if (!label) return null
   const kind = LABEL_TO_KIND[label]
@@ -175,7 +211,13 @@ export async function runReadCypher(
   }
 }
 
-export async function fetchLiveGraph(): Promise<GraphData> {
+const SCOPE_PREDICATE: Record<GraphScope, (v: string) => string> = {
+  orbit: v => `(${v}:Venue OR ${v}:Contact OR ${v}:Source OR ${v}:Sequence)`,
+  hydra: v => `${v}:Modus`,
+  both: v => `(${v}:Venue OR ${v}:Contact OR ${v}:Source OR ${v}:Sequence OR ${v}:Modus)`,
+}
+
+export async function fetchLiveGraph(scope: GraphScope = 'orbit'): Promise<GraphData> {
   if (!isLiveConfigured()) throw new Error('Neo4j not configured — add your Aura connection in Settings')
   const { uri, user, pass, db } = creds()
   const driver = neo4j.driver(uri!, neo4j.auth.basic(user!, pass!))
@@ -186,9 +228,9 @@ export async function fetchLiveGraph(): Promise<GraphData> {
 
     const result = await driver.executeQuery(
       `MATCH (n)
-       WHERE n:Venue OR n:Contact OR n:Source OR n:Sequence
+       WHERE ${SCOPE_PREDICATE[scope]('n')}
        OPTIONAL MATCH (n)-[r]->(m)
-       WHERE m:Venue OR m:Contact OR m:Source OR m:Sequence
+       WHERE ${SCOPE_PREDICATE[scope]('m')}
        RETURN n, type(r) AS rel, m`,
       {},
       { database: db, routing: 'READ' as any },
@@ -216,7 +258,7 @@ export async function fetchLiveGraph(): Promise<GraphData> {
       nodes: [...nodes.values()],
       links,
       origin: 'live',
-      note: `Neo4j Aura · ${nodes.size} nodes`,
+      note: `Neo4j Aura · ${scope === 'orbit' ? '' : scope === 'hydra' ? 'Hydra · ' : 'Orbit + Hydra · '}${nodes.size} nodes`,
     }
   } finally {
     await driver.close()

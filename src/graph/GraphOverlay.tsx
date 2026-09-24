@@ -6,8 +6,8 @@ import ForceGraph3D from '3d-force-graph'
 import type { Lead, OutreachStatus, Vertical } from '../types'
 import { STATUSES, STATUS_LABEL, STATUS_COLOR } from '../types'
 import { loadAllVerticals } from '../verticals'
-import type { GraphData, GraphNode, GraphLink } from './types'
-import { KIND_COLOR, KIND_LABEL } from './types'
+import type { GraphData, GraphNode, GraphLink, GraphScope } from './types'
+import { KIND_COLOR, KIND_LABEL, ORBIT_KINDS, HYDRA_KINDS, ORBIT_LINKS, HYDRA_LINKS, isHydraKind } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink, runReadCypher } from './neo4jSource'
@@ -41,6 +41,9 @@ const LINK_COLOR: Record<GraphLink['kind'], string> = {
   ENROLLED_IN: '#34d399',
   TARGETS: '#22d3ee',
   COLLEAGUE_OF: '#3b9eff',
+  // Hydra (Modus) — each edge takes the colour of the kind it points into.
+  AT: '#94a3b8', INVOLVED: '#60a5fa', APPLIED_SKILL: '#facc15', USED_SKILL: '#eab308', ACHIEVED_IN: '#f472b6',
+  ACHIEVED_VIA: '#38bdf8', DEMONSTRATES: '#a3e635', EVIDENCED_BY: '#e7e5e4', RELATED_TO: '#fde68a',
 }
 const LINK_DIM: Record<GraphLink['kind'], string> = {
   WORKS_AT: '#39465a',
@@ -48,6 +51,8 @@ const LINK_DIM: Record<GraphLink['kind'], string> = {
   ENROLLED_IN: '#204a3b',
   TARGETS: '#1f4552',
   COLLEAGUE_OF: '#1a3a5c',
+  AT: '#3e4550', INVOLVED: '#29466a', APPLIED_SKILL: '#67550e', USED_SKILL: '#614b09', ACHIEVED_IN: '#65314f',
+  ACHIEVED_VIA: '#194f69', DEMONSTRATES: '#44601b', EVIDENCED_BY: '#5f5f61', RELATED_TO: '#68603d',
 }
 const REL_LABEL: Record<GraphLink['kind'], string> = {
   WORKS_AT: 'works at',
@@ -55,6 +60,15 @@ const REL_LABEL: Record<GraphLink['kind'], string> = {
   ENROLLED_IN: 'enrolled in',
   TARGETS: 'targets',
   COLLEAGUE_OF: 'colleague of',
+  AT: 'at',
+  INVOLVED: 'involved',
+  APPLIED_SKILL: 'applied skill',
+  USED_SKILL: 'used skill',
+  ACHIEVED_IN: 'achieved in',
+  ACHIEVED_VIA: 'achieved via',
+  DEMONSTRATES: 'demonstrates',
+  EVIDENCED_BY: 'evidenced by',
+  RELATED_TO: 'related to',
 }
 
 const DIM = '#1f2937'
@@ -64,12 +78,18 @@ export type ThemeMode = 'dark' | 'light'
 // Light "plate" palette (muted plate inks) — mirrors the About exhibit.
 const KIND_COLOR_LIGHT: Record<GraphNode['kind'], string> = {
   venue: '#2f7d84', contact: '#6a5aa6', source: '#b5622a', sequence: '#4d7a46',
+  employer: '#6b7280', role: '#a8527a', project: '#3f6fa8', skill: '#9a7b12',
+  achievement: '#5d7f1e', artifact: '#7a746a', education: '#5a5fa6',
 }
 const LINK_COLOR_LIGHT: Record<GraphLink['kind'], string> = {
   WORKS_AT: '#6b6659', VERIFIED_BY: '#b5622a', ENROLLED_IN: '#4d7a46', TARGETS: '#2f7d84', COLLEAGUE_OF: '#6a5aa6',
+  AT: '#6b7280', INVOLVED: '#3f6fa8', APPLIED_SKILL: '#9a7b12', USED_SKILL: '#8a6a0a', ACHIEVED_IN: '#a8527a',
+  ACHIEVED_VIA: '#2f6f96', DEMONSTRATES: '#5d7f1e', EVIDENCED_BY: '#7a746a', RELATED_TO: '#b0913a',
 }
 const LINK_DIM_LIGHT: Record<GraphLink['kind'], string> = {
   WORKS_AT: '#c3bba6', VERIFIED_BY: '#d8b48f', ENROLLED_IN: '#a9c2a0', TARGETS: '#9ec6cb', COLLEAGUE_OF: '#c9c0dd',
+  AT: '#b4b4b3', INVOLVED: '#a0b3c5', APPLIED_SKILL: '#c9b882', USED_SKILL: '#c2b07e', ACHIEVED_IN: '#cfa6b0',
+  ACHIEVED_VIA: '#99b3bd', DEMONSTRATES: '#adba87', EVIDENCED_BY: '#bab5a9', RELATED_TO: '#d3c294',
 }
 
 interface CanvasTheme {
@@ -117,6 +137,23 @@ function computeStats(g: GraphData) {
     sequences: g.nodes.filter(n => n.kind === 'sequence').length,
     coverage: venues.length ? Math.round((covered.size / venues.length) * 100) : 0,
     uncovered: venues.length - covered.size,
+  }
+}
+
+// Hydra's HUD numbers: how much of the evidence graph is actually verified.
+// Employers and artifacts carry no `verified` flag, so they aren't claims.
+function computeEvidence(g: GraphData) {
+  const hydra = g.nodes.filter(n => isHydraKind(n.kind))
+  const claims = hydra.filter(n => n.verified !== undefined)
+  const verified = claims.filter(n => n.verified).length
+  const count = (k: GraphNode['kind']) => hydra.filter(n => n.kind === k).length
+  return {
+    total: hydra.length,
+    roles: count('role'), skills: count('skill'), projects: count('project'), achievements: count('achievement'),
+    claims: claims.length,
+    verified,
+    unverifiedIds: claims.filter(n => !n.verified).map(n => n.id),
+    pct: claims.length ? Math.round((verified / claims.length) * 100) : 0,
   }
 }
 
@@ -169,7 +206,11 @@ interface PopoutChip { label: string; value: string; onClick?: () => void }
 function buildPopoutChips(node: GraphNode): PopoutChip[] {
   const candidates: (PopoutChip | null)[] = [
     node.district ? { label: 'District', value: node.district } : null,
-    node.verified ? { label: 'Verified', value: '✓' } : null,
+    node.verified ? { label: 'Verified', value: '✓' }
+      : node.verified === false && isHydraKind(node.kind) ? { label: 'Verified', value: '✗ not yet' } : null,
+    node.sourceUrl
+      ? { label: node.kind === 'artifact' ? 'Artifact' : 'Evidence', value: '↗ open', onClick: () => openExternal(hrefFor(node.sourceUrl!)) }
+      : null,
     node.website
       ? { label: 'Website', value: '↗ open', onClick: () => openExternal(hrefFor(node.website!)) }
       : node.linkedinUrl
@@ -281,6 +322,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [filterCount, setFilterCount] = useState<number | null>(null)
   const [verticals] = useState<Vertical[]>(loadAllVerticals)
   const [layout, setLayout] = useState<LayoutMode>('force3d')
+  // Read by the (re)build effect, which re-applies the chosen layout to a
+  // freshly loaded scope instead of snapping back to Force 3D.
+  const layoutRef = useRef<LayoutMode>('force3d')
+  const [scope, setScope] = useState<GraphScope>('orbit')
 
   useEffect(() => {
     let disposed = false
@@ -288,8 +333,11 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     async function resolveData(): Promise<GraphData> {
       if (isLiveConfigured()) {
         try {
-          return await fetchLiveGraph()
+          return await fetchLiveGraph(scope)
         } catch (e: any) {
+          // Hydra only exists in Aura — falling back to local leads would
+          // show Orbit data under a Hydra label.
+          if (scope !== 'orbit') throw e
           setLiveWarning(`Live Neo4j unreachable — showing local data. (${e?.message ?? e})`)
         }
       }
@@ -346,7 +394,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         .backgroundColor(ct().bg)
         .graphData(structuredClone(data))
         .nodeRelSize(4)
-        .nodeVal((n: any) => (n.kind === 'venue' ? 6 : n.kind === 'sequence' ? 5 : 3))
+        .nodeVal((n: any) => (n.kind === 'venue' || n.kind === 'role' ? 6 : n.kind === 'sequence' || n.kind === 'employer' ? 5 : 3))
         .nodeOpacity(1)
         .nodeColor((n: any) => (nodeIsHot(n) ? ct().node[n.kind as GraphNode['kind']] : ct().dim))
         // Permanent text label on every node — kept alongside the default sphere.
@@ -373,7 +421,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           <div style="font:12px/1.4 'DM Mono',monospace;background:${ct().labelBg};border:1px solid ${ct().node[n.kind as GraphNode['kind']]};
             padding:6px 9px;border-radius:4px;color:${ct().labelText};max-width:220px">
             <div style="color:${ct().node[n.kind as GraphNode['kind']]};text-transform:uppercase;letter-spacing:.1em;font-size:9px">
-              ${KIND_LABEL[n.kind as GraphNode['kind']]}${n.verified ? ' · verified' : ''}</div>
+              ${KIND_LABEL[n.kind as GraphNode['kind']]}${n.verified ? ' · verified' : n.verified === false && isHydraKind(n.kind) ? ' · unverified' : ''}</div>
             <div style="font-weight:600;margin-top:2px">${n.label}</div>
             ${n.sub ? `<div style="opacity:.7">${n.sub}</div>` : ''}
             ${n.district ? `<div style="opacity:.7">${n.district}</div>` : ''}
@@ -748,6 +796,19 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       }
       const fit = () => Graph.zoomToFit(700, 60)
 
+      // A scope switch rebuilds the scene; carry the chosen layout over. Not
+      // straight away: the library builds its simulation on a debounced
+      // digest, and reheating before that ticks a layout that doesn't exist
+      // yet ("reading 'tick'"). The first engine tick means it's there.
+      if (layoutRef.current !== 'force3d') {
+        let carried = false
+        Graph.onEngineTick(() => {
+          if (carried) return
+          carried = true
+          applyLayout(layoutRef.current)
+        })
+      }
+
       graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer, clearPopout, applyLayout, stopLayout, fit }
       void focused
     }
@@ -765,11 +826,24 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       graphRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [scope])
 
   function chooseLayout(next: LayoutMode) {
     setLayout(next)
+    layoutRef.current = next
     graphRef.current?.applyLayout(next)
+  }
+
+  // Switching dataset rebuilds the whole scene (the effect above keys on
+  // scope), so drop everything that pointed into the old one.
+  function chooseScope(next: GraphScope) {
+    if (next === scope) return
+    setSelected(null); setSelectedIds([]); setPopout(null)
+    setAskResult(null); setAskOutcome(null); clearTransientAskState()
+    setFilterText(''); setActiveKinds(new Set()); setActiveVerticals(new Set()); setVerifiedOnly(false); setFilterCount(null)
+    setLiveWarning(null)
+    setStatus('loading')
+    setScope(next)
   }
 
   // Re-skin the canvas when the theme flips.
@@ -975,6 +1049,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }
 
   const stats = graphData ? computeStats(graphData) : null
+  const evidence = graphData && scope !== 'orbit' ? computeEvidence(graphData) : null
+  const legendKinds: GraphNode['kind'][] = [...(scope !== 'hydra' ? ORBIT_KINDS : []), ...(scope !== 'orbit' ? HYDRA_KINDS : [])]
+  const legendLinks: GraphLink['kind'][] = [...(scope !== 'hydra' ? ORBIT_LINKS : []), ...(scope !== 'orbit' ? HYDRA_LINKS : [])]
   const neighbors = graphData && selected ? neighborsOf(graphData, selected.id) : []
   // The real lead behind the selected node (venue/contact on a leads graph),
   // driving the action bar. Re-derived from the live `leads` prop so a status
@@ -1124,6 +1201,16 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         )}
         {meta && <div style={styles.counts}>{meta.nodes} nodes · {meta.links} edges</div>}
         <div style={{ flex: 1 }} />
+        {isLiveConfigured() && (
+          <label style={styles.layoutLabel} title="Which dataset to load from Aura. Hydra is the Modus career-evidence graph (read-only).">
+            DATA
+            <select style={styles.layoutSelect} value={scope} disabled={status === 'loading'} onChange={e => chooseScope(e.target.value as GraphScope)}>
+              <option value="orbit">Orbit</option>
+              <option value="hydra">Hydra</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+        )}
         {status === 'ready' && (
           <>
             <label style={styles.layoutLabel} title={LAYOUTS.find(l => l.mode === layout)?.hint}>
@@ -1148,7 +1235,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       {/* Right rail — stats HUD + selected node card share one flex column so they can never overlap */}
       {status === 'ready' && (stats || selected) && (
         <div style={styles.rightRail}>
-          {stats && (
+          {stats && scope !== 'hydra' && (
             <div style={styles.stats}>
               <div style={styles.statsHead}>OUTREACH STATE</div>
               <div style={styles.statGrid}>
@@ -1169,6 +1256,32 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               {stats.uncovered > 0 && (
                 <button style={styles.statAction} onClick={() => runPreset(PRESETS[1])}>
                   {stats.uncovered} {stats.uncovered === 1 ? 'company' : 'companies'} with no verified contact →
+                </button>
+              )}
+            </div>
+          )}
+
+          {evidence && evidence.total > 0 && (
+            <div style={styles.stats}>
+              <div style={styles.statsHead}>HYDRA EVIDENCE</div>
+              <div style={styles.statGrid}>
+                <Stat label="Roles" value={evidence.roles} color={CANVAS[theme].node.role} s={styles} />
+                <Stat label="Skills" value={evidence.skills} color={CANVAS[theme].node.skill} s={styles} />
+                <Stat label="Projects" value={evidence.projects} color={CANVAS[theme].node.project} s={styles} />
+                <Stat label="Achievements" value={evidence.achievements} color={CANVAS[theme].node.achievement} s={styles} />
+              </div>
+              <div style={styles.coverageRow}>
+                <span>verified claims · {evidence.verified}/{evidence.claims}</span>
+                <span style={{ color: evidence.pct >= 60 ? '#34d399' : evidence.pct >= 30 ? '#f97316' : '#EF4444' }}>
+                  {evidence.pct}%
+                </span>
+              </div>
+              <div style={styles.coverageBar}>
+                <div style={{ ...styles.coverageFill, width: `${evidence.pct}%` }} />
+              </div>
+              {evidence.unverifiedIds.length > 0 && (
+                <button style={styles.statAction} onClick={() => graphRef.current?.focusNodes(evidence.unverifiedIds)}>
+                  {evidence.unverifiedIds.length} unverified {evidence.unverifiedIds.length === 1 ? 'claim' : 'claims'} →
                 </button>
               )}
             </div>
@@ -1394,7 +1507,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             </div>
           )}
 
-          <div style={styles.presetScroll}>
+          {/* Presets are Orbit outreach questions — they'd match nothing in Hydra-only scope. */}
+          {scope !== 'hydra' && <div style={styles.presetScroll}>
             {presetGroups.filter(grp => grp.presets.length > 0 || (grp.verticalId && smartGenerating.has(grp.verticalId))).map(grp => (
               <div key={grp.name}>
                 <div style={styles.presetCategoryHead}>
@@ -1412,9 +1526,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
                 </div>
               </div>
             ))}
-          </div>
+          </div>}
 
-          {askNote && <div style={styles.askInfo}>{askNote}</div>}
+          {askNote &&<div style={styles.askInfo}>{askNote}</div>}
           {askError && <div style={styles.askErr}>{askError}</div>}
 
           {askResult && (
@@ -1453,7 +1567,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           {/* Schema / legend — folded into the base of this plate so nothing overlaps */}
           <div style={styles.schema}>
             <div style={styles.legendHead}>{instance ? 'SCHEMA · LIVE' : 'NODES · click to spotlight'}</div>
-            {(Object.keys(KIND_COLOR) as GraphNode['kind'][]).map(k => (
+            {legendKinds.map(k => (
               <button key={k} style={{ ...styles.legendBtn, opacity: nodeCounts[k] ? 1 : 0.4 }} onClick={() => spotlightKind(k)} title={`Light up all ${KIND_LABEL[k]} nodes`}>
                 <span style={{ ...styles.legendDot, background: nodeCol[k] }} />
                 {KIND_LABEL[k]}
@@ -1461,7 +1575,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               </button>
             ))}
             <div style={{ ...styles.legendHead, marginTop: 8 }}>RELATIONSHIPS</div>
-            {(Object.keys(REL_LABEL) as GraphLink['kind'][]).map(k => (
+            {legendLinks.map(k => (
               <div key={k} style={{ ...styles.legendRow, opacity: relCounts[k] ? 1 : 0.4 }}>
                 <span style={{ ...styles.legendArrow, color: relCol[k] }}>→</span>
                 {REL_LABEL[k]}

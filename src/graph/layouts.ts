@@ -25,8 +25,11 @@ const endId = (e: unknown) => (typeof e === 'object' && e !== null ? (e as { id:
 
 // Ring order: companies first, then the people at them, then where the people
 // were verified, then the sequences working them — the same reading order as
-// the legend.
-const RING_ORDER: NodeKind[] = ['venue', 'contact', 'source', 'sequence']
+// the legend. Hydra follows as its own arc: where → what → proof.
+const RING_ORDER: NodeKind[] = [
+  'venue', 'contact', 'source', 'sequence',
+  'employer', 'role', 'project', 'skill', 'achievement', 'artifact', 'education',
+]
 
 // Arc length per node on the ring. Labels are horizontal sprites, so nodes at
 // the top/bottom of the ring sit side by side — this has to fit a typical label.
@@ -58,7 +61,18 @@ export function circularLayout(nodes: GraphNode[]): Positions {
 // Column order follows the real edge directions: VERIFIED_BY points
 // Contact→Source (left), WORKS_AT Contact→Company, TARGETS Sequence→Company
 // (right). COLLEAGUE_OF stays inside the Contact column.
-const TIER_ORDER: NodeKind[] = ['source', 'contact', 'venue', 'sequence']
+// Hydra (placed after Orbit when both load) reads as a career trail:
+// Employer ← Role → Project → Skill → Artifact, with Achievement between the
+// role/project it came from and the skill it demonstrates. Education only
+// points at artifacts, so it sits beside the employers. RELATED_TO stays
+// inside the Skill column.
+const TIER_ORDER: NodeKind[] = [
+  'source', 'contact', 'venue', 'sequence',
+  'education', 'employer', 'role', 'achievement', 'project', 'skill', 'artifact',
+]
+// Each dataset's "spine" column is ranked alphabetically; every other column
+// is ordered by where its neighbours sit, working outward from the nearest spine.
+const ANCHORS = new Set<NodeKind>(['venue', 'role'])
 const ROW_GAP = 22
 const MAX_ROWS = 40 // taller columns wrap into sub-columns instead of running off-screen
 const SUBCOL_GAP = 90
@@ -89,12 +103,18 @@ export function tiersLayout(nodes: GraphNode[], links: GraphLink[]): Positions {
   }
 
   const columns = new Map<NodeKind, GraphNode[]>()
-  const companies = [...byKind('venue')].sort((a, b) => a.label.localeCompare(b.label))
-  companies.forEach((n, i) => rank.set(n.id, i / Math.max(1, companies.length - 1)))
-  columns.set('venue', companies)
-  columns.set('contact', orderBy(byKind('contact')))
-  columns.set('source', orderBy(byKind('source')))
-  columns.set('sequence', orderBy(byKind('sequence')))
+  const anchorIdx = TIER_ORDER.map((k, i) => (ANCHORS.has(k) ? i : -1)).filter(i => i >= 0)
+  const distToAnchor = (i: number) => Math.min(...anchorIdx.map(a => Math.abs(a - i)))
+  const sweep = TIER_ORDER.map((k, i) => ({ k, i })).sort((a, b) => distToAnchor(a.i) - distToAnchor(b.i))
+  for (const { k } of sweep) {
+    if (ANCHORS.has(k)) {
+      const col = [...byKind(k)].sort((a, b) => a.label.localeCompare(b.label))
+      col.forEach((n, i) => rank.set(n.id, i / Math.max(1, col.length - 1)))
+      columns.set(k, col)
+    } else {
+      columns.set(k, orderBy(byKind(k)))
+    }
+  }
 
   // Lay columns out left to right, wrapping tall ones, then centre the whole
   // block on the origin so zoomToFit and the head-on camera line up.
