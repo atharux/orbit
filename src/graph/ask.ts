@@ -584,8 +584,9 @@ export function findShortestPath(g: GraphData, fromId: string, toId: string): As
 
 // --- live free-text engine (NL -> Cypher -> Aura) ---------------------------
 
-const SCHEMA_PROMPT = `You write a single read-only Cypher query for a Neo4j graph.
-The :Venue label represents a business/company — most verticals are trades
+// The graph's shape as the models see it — shared by the one-shot ask below and
+// the multi-step investigation loop (investigate.ts), so they can't drift.
+export const GRAPH_SCHEMA = `The :Venue label represents a business/company — most verticals are trades
 businesses, but the "linkedin" vertical_id is a personal LinkedIn network:
 its Venue nodes are the imported contacts' employers, and its Contact nodes
 carry linkedin_url/linkedin_industry/linkedin_location. Map "business",
@@ -601,6 +602,12 @@ Schema:
   (:Contact)-[:ENROLLED_IN]->(:Sequence)
   (:Sequence)-[:TARGETS]->(:Venue)
   (:Contact)-[:COLLEAGUE_OF]->(:Contact)  — two LinkedIn contacts sharing a Venue via WORKS_AT
+"Verified" means the Contact property verified = true (only a few dozen contacts).
+VERIFIED_BY only records the Source a contact was found through — almost every
+contact has one — so it does NOT mean the contact is verified.`
+
+const SCHEMA_PROMPT = `You write a single read-only Cypher query for a Neo4j graph.
+${GRAPH_SCHEMA}
 Rules:
 - READ ONLY. Never CREATE/MERGE/SET/DELETE/REMOVE/CALL {}/LOAD.
 - Always RETURN the node(s) the question is about (not just counts) so they can be highlighted.
