@@ -2,7 +2,8 @@
   "name": "orbit",
   "private": true,
   "version": "0.1.0",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
+  "author": "Athar Hafiz (atharux)",
   "type": "module",
   "scripts": {
     "dev": "vite",
