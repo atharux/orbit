@@ -417,6 +417,27 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       stars.visible = ct().stars
       Graph.scene().add(stars)
 
+      // Library mismatch: after a node click/drag, 3d-force-graph dispatches a
+      // synthetic 'pointerup' (pointerId 0) at the document so OrbitControls
+      // doesn't take over. three r185's OrbitControls isn't tracking pointer
+      // 0, still has the real mouse pointer in its list, takes the "one
+      // pointer left" branch and reads a position it only records for touch
+      // → "TypeError: Cannot read properties of undefined (reading 'x')" on
+      // every node click. The real pointerup that follows does the cleanup,
+      // so drop pointer-ups for pointers the controls aren't tracking.
+      // Swapped in before any pointerdown, which is when OrbitControls
+      // registers this handler on the document.
+      {
+        const orbit: any = Graph.controls()
+        const onUp = orbit._onPointerUp
+        if (typeof onUp === 'function' && Array.isArray(orbit._pointers)) {
+          orbit._onPointerUp = (e: PointerEvent) => {
+            if (!orbit._pointers.includes(e.pointerId)) return
+            onUp(e)
+          }
+        }
+      }
+
       // Gentle cinematic auto-orbit; pauses while a node is focused.
       const controls: any = Graph.controls()
       controls.autoRotate = true
