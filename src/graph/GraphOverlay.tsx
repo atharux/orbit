@@ -17,7 +17,7 @@ import { loadSmartPresets, generateSmartPresets, type SmartPreset } from './smar
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
 import { openExternal } from '../utils/openExternal'
-import { LAYOUTS, computeLayout, isFlat, type LayoutMode } from './layouts'
+import { LAYOUTS, computeLayout, isFlat, isPinned, type LayoutMode } from './layouts'
 // Lazy: CypherEditor pulls in CodeMirror + the ANTLR-based Cypher grammar,
 // and only ever renders when meta?.origin === 'live' -- code-split so that
 // cost isn't paid by everyone loading the graph, only once a live Aura
@@ -58,6 +58,19 @@ const REL_LABEL: Record<GraphLink['kind'], string> = {
 }
 
 const DIM = '#1f2937'
+
+// Rendering budgets (see initGraph): past these, the per-object cost of
+// labels / particles outweighs what they tell you.
+const MAX_FOCUS_LABELS = 80 // a focus set this small always shows its labels
+const MAX_PARTICLE_LINKS = 60 // a focused neighbourhood bigger than this gets no particles
+const CIRCULAR_MAX = 200 // largest scene Circular will lay out
+const LABEL_DIM_OPACITY = 0.28 // non-neighbour labels while something is focused
+// Circular draws bigger nodes and radial labels (rotated to point outward),
+// like Bloom's ring — the 3D sizes are ~1% of a ring's width, i.e. invisible.
+const NODE_REL = 4
+const CIRCLE_NODE_REL = 7
+const RADIAL_TEXT = 16 // world units; the ring allots 34 per node, so neighbours never touch
+const RADIAL_CHARS = 26 // radial labels are clipped to this; full text is in the hover card
 
 export type ThemeMode = 'dark' | 'light'
 
@@ -281,6 +294,15 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [filterCount, setFilterCount] = useState<number | null>(null)
   const [verticals] = useState<Vertical[]>(loadAllVerticals)
   const [layout, setLayout] = useState<LayoutMode>('force3d')
+  // How many nodes the current fixed layout covers when it was applied to a
+  // selection (Bloom-style scene), or null when it covers the whole graph.
+  const [layoutSubset, setLayoutSubset] = useState<number | null>(null)
+  const [layoutNotice, setLayoutNotice] = useState('')
+  // For layout changes the canvas makes on its own (a fallback) — keeps the
+  // dropdown honest.
+  function syncLayout(next: LayoutMode) {
+    setLayout(next)
+  }
 
   useEffect(() => {
     let disposed = false
@@ -339,32 +361,37 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           : highlightNodes.size ? ct().linkFade
           : ct().linkRest[l.kind as GraphLink['kind']]
 
+      const nodeValOf = (n: any) => (n.kind === 'venue' ? 6 : n.kind === 'sequence' ? 5 : 3)
+
       const Graph = new ForceGraph3D(el, { controlType: 'orbit' })
         // The library's own "Left-click: rotate…" footer is wrong once a flat
         // layout remaps drag to pan; our hint line covers both modes.
         .showNavInfo(false)
         .backgroundColor(ct().bg)
         .graphData(structuredClone(data))
-        .nodeRelSize(4)
-        .nodeVal((n: any) => (n.kind === 'venue' ? 6 : n.kind === 'sequence' ? 5 : 3))
+        .nodeRelSize(NODE_REL)
+        .nodeVal(nodeValOf)
         .nodeOpacity(1)
         .nodeColor((n: any) => (nodeIsHot(n) ? ct().node[n.kind as GraphNode['kind']] : ct().dim))
         // Permanent text label on every node — kept alongside the default sphere.
         .nodeThreeObjectExtend(true)
         .nodeThreeObject((n: any) => {
           const kind = n.kind as GraphNode['kind']
-          const hot = nodeIsHot(n)
           const t = new SpriteText(n.label)
-          t.color = hot ? ct().labelText : ct().labelTextDim
+          t.color = ct().labelText
           t.fontFace = 'DM Mono, ui-monospace, monospace'
           t.fontWeight = '600'
           t.textHeight = kind === 'venue' || kind === 'sequence' ? 3.4 : 2.4
-          t.backgroundColor = hot ? ct().labelBg : ct().labelBgDim
-          t.borderColor = hot ? ct().labelBorder : ct().labelBorderDim
+          t.backgroundColor = ct().labelBg
+          t.borderColor = ct().labelBorder
           t.borderWidth = 0.15
           t.borderRadius = 2.5
           t.padding = 2.2
           t.position.set(0, kind === 'venue' ? 11 : kind === 'sequence' ? 10 : 8, 0)
+          // Fading is done with material opacity, not colour: every SpriteText
+          // colour setter redraws its canvas and re-uploads the texture.
+          t.material.transparent = true
+          t.material.opacity = nodeIsHot(n) ? 1 : LABEL_DIM_OPACITY
           labelById.set(n.id, t)
           return t
         })
@@ -387,13 +414,18 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         .linkColor(linkRestColor)
         .linkWidth((l: any) => (highlightLinks.has(l) ? 1.8 : 0.7))
         .linkOpacity(0.6)
-        // Arrowheads show relationship DIRECTION (who relates to whom) at rest.
-        .linkDirectionalArrowLength(3.4)
+        // Arrowheads show relationship DIRECTION on the focused links only.
+        // Every arrowhead is its own mesh — ~1,400 extra draw calls per frame
+        // at rest on the live graph, measured — and at overview distance
+        // they're sub-pixel anyway.
+        .linkDirectionalArrowLength((l: any) => (highlightLinks.has(l) ? 3.4 : 0))
         .linkDirectionalArrowRelPos(0.92)
         .linkDirectionalArrowColor(linkRestColor)
         .linkLabel((l: any) => `<span style="font:10px 'DM Mono',monospace;color:${ct().linkFull[l.kind as GraphLink['kind']]}">${REL_LABEL[l.kind as GraphLink['kind']]}</span>`)
-        // Particles now only stream on the focused neighbourhood — less noise.
-        .linkDirectionalParticles((l: any) => (highlightLinks.has(l) ? 3 : 0))
+        // Particles only stream on a focused neighbourhood small enough to read.
+        // A hub (a sequence targeting 500+ companies) would otherwise spawn a
+        // mesh per particle on every one of its links — that was the click lag.
+        .linkDirectionalParticles((l: any) => (highlightLinks.has(l) && highlightLinks.size <= MAX_PARTICLE_LINKS ? 3 : 0))
         .linkDirectionalParticleWidth(1.8)
         .linkDirectionalParticleSpeed(0.008)
         .linkDirectionalParticleColor((l: any) => ct().linkFull[l.kind as GraphLink['kind']])
@@ -402,6 +434,33 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       // Spread nodes out further so labels don't collide.
       Graph.d3Force('charge')?.strength(-320)
+
+      // Retina renders (and blooms) 4× the pixels of 1×; 1.5× is visibly
+      // sharp and roughly halves the fill cost.
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
+      Graph.renderer().setPixelRatio(pixelRatio)
+      Graph.postProcessingComposer().setPixelRatio?.(pixelRatio)
+
+      // Label level-of-detail. Every label is its own sprite + texture (~950
+      // draw calls on the live graph); past a certain camera distance they're
+      // too small to read and only cost frames. Show a label when it would
+      // render at a legible size, or when its node is part of a small focus
+      // set.
+      const LEGIBLE_PX = 5
+      function updateLabelLOD() {
+        const nodes = Graph.graphData().nodes as any[]
+        const cam = Graph.camera() as THREE.PerspectiveCamera
+        const k = el.clientHeight / (2 * Math.tan((cam.fov * Math.PI) / 360) * LEGIBLE_PX)
+        const focusSmall = highlightNodes.size > 0 && highlightNodes.size <= MAX_FOCUS_LABELS
+        for (const n of nodes) {
+          const t = labelById.get(n.id)
+          if (!t) continue
+          if (focusSmall && highlightNodes.has(n.id)) { t.visible = true; continue }
+          const d = Math.hypot(cam.position.x - (n.x || 0), cam.position.y - (n.y || 0), cam.position.z - (n.z || 0))
+          t.visible = d <= t.textHeight * k
+        }
+      }
+      const labelTimer = window.setInterval(updateLabelLOD, 200)
 
       // Very gentle bloom (dark theme only; light "plate" theme sets it to 0).
       const bloom = new UnrealBloomPass(
@@ -457,6 +516,18 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       let layoutTween = 0
       let layoutFitTimer: number | null = null
       type XYZ = { x: number; y: number; z: number }
+      // Set when a fixed layout was applied to a selection: only these nodes
+      // are laid out and shown, like a Bloom scene. null = whole graph.
+      let subsetIds: Set<string> | null = null
+      const inSubset = (n: any) => !subsetIds || subsetIds.has(n.id)
+      const endId = (e: any) => (typeof e === 'object' && e !== null ? e.id : e)
+
+      function setSubset(ids: Set<string> | null) {
+        subsetIds = ids
+        Graph.nodeVisibility(inSubset)
+          .linkVisibility((l: any) => !subsetIds || (subsetIds.has(endId(l.source)) && subsetIds.has(endId(l.target))))
+        setLayoutSubset(ids ? ids.size : null)
+      }
 
       // Glide every node from where it is now to `targets` by pinning it
       // (fx/fy/fz) along an eased path, so you can follow a node through the
@@ -491,15 +562,130 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       }
 
       function fitLater(ms: number) {
-        if (layoutFitTimer !== null) window.clearTimeout(layoutFitTimer)
-        layoutFitTimer = window.setTimeout(() => { layoutFitTimer = null; if (!disposed) Graph.zoomToFit(700, 60) }, ms)
+        if (userHasCamera) return
+        clearFitTimer()
+        layoutFitTimer = window.setTimeout(() => { layoutFitTimer = null; if (!disposed && !userHasCamera) fitView(700) }, ms)
       }
 
-      function applyLayout(next: LayoutMode) {
-        const prev = layout
-        layout = next
+      // Frame what's on screen. The library's zoomToFit frames a head-on flat
+      // layout ~2× too loosely (measured: ring 1,082 wide → camera 3,066 away,
+      // where every label is below legible size) and ignores the panels that
+      // cover the canvas' sides. Flat layouts get an exact fit into the area
+      // between the panels, labels included; 3D keeps the library fit.
+      function fitView(ms: number) {
+        if (!isFlat(layout)) { Graph.zoomToFit(ms, 60, inSubset); return }
+        const ns = (Graph.graphData().nodes as any[]).filter(inSubset)
+        if (!ns.length) return
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        for (const n of ns) {
+          const r = Math.cbrt(nodeValOf(n)) * Graph.nodeRelSize()
+          // Radial labels stick out of the ring by their full width.
+          const e = r + (layout === 'circular' ? (labelById.get(n.id)?.scale.x ?? 0) + 4 : 0)
+          minX = Math.min(minX, n.x - e); maxX = Math.max(maxX, n.x + e)
+          minY = Math.min(minY, n.y - e); maxY = Math.max(maxY, n.y + e)
+        }
+        const W = el.clientWidth, H = el.clientHeight
+        const leftPx = Math.min(340, W * 0.3), rightPx = Math.min(290, W * 0.25), topPx = 56, padPx = 24
+        const usableW = Math.max(200, W - leftPx - rightPx - 2 * padPx)
+        const usableH = Math.max(200, H - topPx - 2 * padPx)
+        const tan = Math.tan(((Graph.camera() as THREE.PerspectiveCamera).fov * Math.PI) / 360)
+        const d = Math.max(((maxX - minX) * H) / (2 * tan * usableW), ((maxY - minY) * H) / (2 * tan * usableH), 150)
+        const worldPerPx = (2 * d * tan) / H
+        // Centre the content in the free area, not the full canvas.
+        const cx = (minX + maxX) / 2 - ((leftPx - rightPx) / 2) * worldPerPx
+        const cy = (minY + maxY) / 2 + (topPx / 2) * worldPerPx
+        Graph.cameraPosition({ x: cx, y: cy, z: d }, { x: cx, y: cy, z: 0 }, ms)
+      }
+
+      // Any pending auto-fit (initial load, after a layout lands) must not
+      // fire once the user has taken over the camera — that was "click a node
+      // and it zooms out of view": the fit fired after the click's fly-in.
+      //
+      // A timer alone isn't enough: after a layout change the fit is only
+      // scheduled once the tween lands, so a click mid-tween had nothing to
+      // cancel. The flag is checked when the fit is scheduled and when it
+      // fires; choosing a layout clears it (that choice asks for a fit).
+      let userHasCamera = false
+      function clearFitTimer() {
+        if (layoutFitTimer !== null) { window.clearTimeout(layoutFitTimer); layoutFitTimer = null }
+      }
+      function cancelAutoFit() {
+        userHasCamera = true
+        clearFitTimer()
+      }
+      controls.addEventListener('start', cancelAutoFit)
+
+      // In a force layout the simulation can still be moving the node you
+      // just flew to; hold it in place while it's focused.
+      let heldNode: any = null
+      function releaseHeld() {
+        if (heldNode && !isPinned(layout)) { delete heldNode.fx; delete heldNode.fy; delete heldNode.fz }
+        heldNode = null
+      }
+      function holdNode(n: any) {
+        releaseHeld()
+        if (isPinned(layout)) return
+        n.fx = n.x; n.fy = n.y; n.fz = n.z
+        heldNode = n
+      }
+
+      // Circular: rotate each label to point away from the ring's centre and
+      // sit just outside its (bigger) node, so ~100 labels read without
+      // colliding. `posOf` gives each node's final ring position; null
+      // restores the default above-the-node label. Only touches labels that
+      // need it — every SpriteText setter redraws the label's canvas.
+      function styleLabels(posOf: ((n: any) => { x: number; y: number } | undefined) | null) {
+        for (const n of Graph.graphData().nodes as any[]) {
+          const t = labelById.get(n.id) as any
+          if (!t) continue
+          const p = posOf?.(n)
+          if (p) {
+            if (!t.userData.base) t.userData.base = { h: t.textHeight, y: t.position.y }
+            if (t.textHeight !== RADIAL_TEXT) t.textHeight = RADIAL_TEXT
+            // Long labels (full company names run 40+ chars) would stick out
+            // so far the whole ring has to shrink to fit; clip like Bloom
+            // does. The hover card still carries the full text.
+            const short = n.label.length > RADIAL_CHARS ? `${n.label.slice(0, RADIAL_CHARS - 1)}…` : n.label
+            if (t.text !== short) t.text = short
+            const a = Math.atan2(p.y, p.x)
+            t.material.rotation = Math.cos(a) < 0 ? a + Math.PI : a // keep text upright on the left half
+            const off = Math.cbrt(nodeValOf(n)) * CIRCLE_NODE_REL + 4 + t.scale.x / 2
+            t.position.set(Math.cos(a) * off, Math.sin(a) * off, 0)
+          } else if (t.userData.base) {
+            t.text = n.label
+            t.textHeight = t.userData.base.h
+            t.material.rotation = 0
+            t.position.set(0, t.userData.base.y, 0)
+            delete t.userData.base
+          }
+        }
+      }
+
+      const sceneFits = (next: LayoutMode, size: number) => !(next === 'circular' && size > CIRCULAR_MAX)
+      // The scene a layout would arrange: the selection (2+ nodes) for a
+      // fixed layout, else the whole graph. One rule for applyLayout and
+      // rescope — a 1-node focus is not a scene.
+      const sceneSizeFor = (next: LayoutMode) =>
+        isPinned(next) && highlightNodes.size > 1 ? highlightNodes.size : Graph.graphData().nodes.length
+
+      // Returns false when the layout would be unreadable and was not applied.
+      function applyLayout(next: LayoutMode): boolean {
         const nodes = Graph.graphData().nodes as any[]
         const links = Graph.graphData().links as any[]
+        // A ring stops being readable past ~200 nodes (a few px per node).
+        // Circular lays out a scene that size or smaller — a selection, or a
+        // small graph — and says why otherwise instead of drawing mush.
+        const sceneSize = sceneSizeFor(next)
+        if (!sceneFits(next, sceneSize)) {
+          setLayoutNotice(`Circular is readable up to ${CIRCULAR_MAX} nodes — this scene has ${sceneSize}. Click a node, run a preset or filter to pick a smaller scene, then choose Circular.`)
+          return false
+        }
+        setLayoutNotice('')
+        releaseHeld()
+        clearFitTimer()
+        userHasCamera = false
+        const prev = layout
+        layout = next
         clearPopout()
         controls.autoRotate = rotateAtRest() && highlightNodes.size === 0
         // Flat layouts read like a map: left-drag pans, right-drag still
@@ -508,10 +694,23 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           ? { ...orbitButtons, LEFT: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE }
           : { ...orbitButtons }
 
-        const fixed = computeLayout(next, nodes, links)
+        // With a selection (a clicked node's neighbourhood, a preset/filter/ask
+        // result, a shift-click set), a fixed layout arranges just that — the
+        // whole graph at 900+ nodes is too big to read as a ring or columns.
+        const sel = isPinned(next) && highlightNodes.size > 1 ? new Set(highlightNodes) : null
+        setSubset(sel)
+        const layoutNodes = sel ? nodes.filter(n => sel.has(n.id)) : nodes
+        const layoutLinks = sel ? links.filter(l => sel.has(endId(l.source)) && sel.has(endId(l.target))) : links
+
+        const fixed = computeLayout(next, layoutNodes, layoutLinks)
+        Graph.nodeRelSize(next === 'circular' ? CIRCLE_NODE_REL : NODE_REL)
+        styleLabels(next === 'circular' && fixed ? (n: any) => fixed.get(n.id) : null)
         if (fixed) {
           const targets = new Map<string, XYZ>()
           for (const [id, p] of fixed) targets.set(id, { x: p.x, y: p.y, z: 0 })
+          // Park everything outside the selection where it is (hidden, and
+          // pinned so the simulation stops pushing invisible nodes around).
+          if (sel) for (const n of nodes) if (!sel.has(n.id)) targets.set(n.id, { x: n.x || 0, y: n.y || 0, z: n.z || 0 })
           // Fit once the tween has landed, not on a guessed timer — on a slow
           // machine the nodes are still mid-flight at any fixed delay.
           tweenTo(targets, 850, () => fitLater(120))
@@ -548,6 +747,22 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           const d = Graph.camera().position.length() || 600
           Graph.cameraPosition({ x: 0, y: 0, z: d }, { x: 0, y: 0, z: 0 }, 800)
         }
+        return true
+      }
+
+      // Re-lay the whole graph (leaving a selection-scoped layout). If the
+      // current layout can't take the whole graph, fall back to Force 2D so
+      // the view stays flat and head-on.
+      function relayoutAll() {
+        rescope()
+      }
+      // Re-apply the current layout to the current scene (see sceneSizeFor),
+      // falling back to Force 2D — quietly, nothing to explain — when it
+      // won't fit.
+      function rescope() {
+        const target: LayoutMode = sceneFits(layout, sceneSizeFor(layout)) ? layout : 'force2d'
+        applyLayout(target)
+        syncLayout(target)
       }
 
       // Ambient "synaptic" heartbeat — a slow, sparse impulse that fires ONLY
@@ -574,17 +789,17 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           .linkColor(Graph.linkColor())
           .linkWidth(Graph.linkWidth())
           .linkDirectionalArrowColor(Graph.linkDirectionalArrowColor())
+          .linkDirectionalArrowLength(Graph.linkDirectionalArrowLength())
           .linkDirectionalParticles(Graph.linkDirectionalParticles())
-        // Restyle existing label sprites in place (cheap) so non-neighbors fade
-        // too, not just the node dot — see labelById above for why this isn't
-        // a .nodeThreeObject(...) call.
+        updateLabelLOD()
+        // Fade non-neighbour labels in place so they recede too, not just the
+        // node dot. Opacity only — a colour change would redraw and re-upload
+        // every label's canvas (~2,800 redraws per click on the live graph,
+        // which was most of the click lag).
         for (const n of Graph.graphData().nodes as any[]) {
           const t = labelById.get(n.id)
           if (!t) continue
-          const hot = nodeIsHot(n)
-          t.color = hot ? ct().labelText : ct().labelTextDim
-          t.backgroundColor = hot ? ct().labelBg : ct().labelBgDim
-          t.borderColor = hot ? ct().labelBorder : ct().labelBorderDim
+          t.material.opacity = nodeIsHot(n) ? 1 : LABEL_DIM_OPACITY
         }
       }
 
@@ -599,6 +814,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         // re-trigger delay on a genuine same-node re-click is the smaller
         // problem.
         focused = node
+        cancelAutoFit()
+        holdNode(node)
         multiSel.clear()
         setSelectedIds([])
         controls.autoRotate = false
@@ -658,6 +875,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         setSelectedIds([...multiSel])
       }
       function toggleSelect(id: string) {
+        cancelAutoFit()
+        releaseHeld()
         multiSel.has(id) ? multiSel.delete(id) : multiSel.add(id)
         setSelected(null)
         clearPopout()
@@ -680,6 +899,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         setSelected(null)
         setSelectedIds([])
         clearPopout()
+        releaseHeld()
+        if (subsetIds) relayoutAll()
       })
 
       // Keep the popout glued to its node's on-screen position every frame,
@@ -719,12 +940,17 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       // Imperative handle for the ask panel: light up an arbitrary node set.
       function focusNodes(ids: string[]) {
+        releaseHeld()
         highlightNodes.clear()
         highlightLinks.clear()
         multiSel.clear()
         setSelected(null)
         clearPopout()
-        if (ids.length === 0) { controls.autoRotate = rotateAtRest(); refreshHighlight(); setSelectedIds([]); return }
+        if (ids.length === 0) {
+          controls.autoRotate = rotateAtRest(); refreshHighlight(); setSelectedIds([])
+          if (subsetIds) relayoutAll()
+          return
+        }
         ids.forEach(id => { highlightNodes.add(id); multiSel.add(id) })
         for (const l of (Graph.graphData().links as any[])) {
           const s = typeof l.source === 'object' ? l.source.id : l.source
@@ -733,9 +959,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         }
         refreshHighlight()
         controls.autoRotate = false
+        cancelAutoFit()
         Graph.zoomToFit(1400, 90, (n: any) => highlightNodes.has(n.id))
         // A preset/filter result IS a selection you can act on in bulk.
         setSelectedIds([...ids])
+        // Already looking at a selection-scoped layout? Re-scope it to the new set.
+        if (subsetIds) rescope()
       }
 
       // Select a node by id (used by the connections list to navigate).
@@ -755,19 +984,21 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           .nodeLabel(Graph.nodeLabel())
           .linkColor(Graph.linkColor())
           .linkDirectionalArrowColor(Graph.linkDirectionalArrowColor())
+        if (layout === 'circular') styleLabels((n: any) => (inSubset(n) ? { x: n.fx ?? n.x, y: n.fy ?? n.y } : undefined))
       }
 
       const onResize = () => Graph.width(el.clientWidth).height(el.clientHeight)
       window.addEventListener('resize', onResize)
 
-      // fit once the layout settles
-      setTimeout(() => Graph.zoomToFit(1200, 60), 700)
+      // fit once the layout settles — cancellable, so an early click wins
+      fitLater(700)
 
       function stopLayout() {
         cancelAnimationFrame(layoutTween)
         if (layoutFitTimer !== null) window.clearTimeout(layoutFitTimer)
+        clearInterval(labelTimer)
       }
-      const fit = () => Graph.zoomToFit(700, 60)
+      const fit = () => fitView(700)
 
       graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer, clearPopout, applyLayout, stopLayout, fit }
       void focused
@@ -789,8 +1020,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }, [])
 
   function chooseLayout(next: LayoutMode) {
-    setLayout(next)
-    graphRef.current?.applyLayout(next)
+    if (graphRef.current?.applyLayout(next) === false) return // refused; notice explains why
+    syncLayout(next)
   }
 
   // Re-skin the canvas when the theme flips.
@@ -1153,7 +1384,16 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
                 {LAYOUTS.map(l => <option key={l.mode} value={l.mode} title={l.hint}>{l.label}</option>)}
               </select>
             </label>
-            <button style={styles.themeBtn} onClick={() => graphRef.current?.fit()} title="Frame the whole graph">Fit ⤢</button>
+            {layoutSubset !== null && (
+              <button
+                style={styles.themeBtn}
+                onClick={() => graphRef.current?.focusNodes([])}
+                title={`This layout shows only the ${layoutSubset} selected nodes — click to lay out the whole graph`}
+              >
+                Show all
+              </button>
+            )}
+            <button style={styles.themeBtn} onClick={() => graphRef.current?.fit()} title="Frame everything on screen">Fit ⤢</button>
           </>
         )}
         <button
@@ -1285,6 +1525,11 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       )}
 
       {liveWarning && <div style={styles.warn}>{liveWarning}</div>}
+      {layoutNotice && (
+        <div style={{ ...styles.warn, top: liveWarning ? 96 : 60, cursor: 'pointer' }} onClick={() => setLayoutNotice('')} title="Dismiss">
+          {layoutNotice}
+        </div>
+      )}
       {meta?.origin === 'sample' && <div style={styles.sampleNote}>{meta.note}</div>}
 
       {status === 'loading' && <div style={styles.center}>connecting to graph…</div>}
