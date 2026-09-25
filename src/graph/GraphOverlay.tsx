@@ -1320,8 +1320,10 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const stats = graphData ? computeStats(graphData) : null
   // Structural signal (structure.ts): computed in-app over the loaded graph.
   const structure = useMemo(() => (graphData ? analyzeStructure(graphData) : null), [graphData])
-  // The same analysis as one step the investigation loop can take.
-  const structureTool = structure
+  // The same analysis as one step the investigation loop can take — only when
+  // the canvas holds the live graph the loop's Cypher queries. On a local/sample
+  // fallback it would describe a different graph (and offer its ids as evidence).
+  const structureTool = structure && meta?.origin === 'live'
     ? () => ({ text: renderStructure(structure), nodeIds: [...structure.bridges.map(b => b.id), ...structure.largestClusterIds] })
     : undefined
   // Only live data can confirm or stale a card: local/sample fallbacks are a

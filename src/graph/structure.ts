@@ -133,14 +133,16 @@ export function analyzeStructure(data: GraphData): StructureReport {
     nodes: g.order,
     edges: g.size,
     isolatedIds,
-    clusters: comps.length,
+    clusters: comps.filter(c => c.length >= 2).length, // unconnected nodes are reported separately, not as clusters of one
     largestClusterIds: comps[0] ?? [],
     communities: communitiesAll.slice(0, MAX_COMMUNITIES),
     communityCount: communitiesAll.length,
     modularity: lv?.modularity ?? 0,
     bridges,
     whyNoBridges: bridges.length ? undefined
-      : `no node connects two groups: ${multiAffiliated === 0 ? 'no contact is linked to more than one company' : `${multiAffiliated} contacts link several companies, but not across communities`}, so every cluster is a single company and its people`,
+      : multiAffiliated === 0
+        ? 'no node connects two groups: no contact is linked to more than one company, so every cluster is a single company and its people'
+        : `no node connects two groups: ${multiAffiliated} contact${multiAffiliated === 1 ? ' links' : 's link'} several companies, but those companies fall in the same community, so no one connects separate groups`,
   }
 }
 
