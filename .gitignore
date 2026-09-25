@@ -20,6 +20,14 @@ __pycache__/
 # Private operator brief — for Athar only, never committed or shared
 OPERATOR-BRIEF.md
 
+# Real LinkedIn / contact exports (names, profile URLs of real people). The
+# repo is public — these are one `git add -A` from being published. The
+# synthetic fixture (fixtures/linkedin-sample-export.csv) stays tracked.
+*LinkedIn_Contacts*.csv
+*LinkedIn_Contacts*.xlsx
+*Connections*.csv
+!fixtures/**
+
 # Serena MCP local cache
 .serena/
 
