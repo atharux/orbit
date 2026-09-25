@@ -121,6 +121,47 @@ export async function runReadRows(
   }
 }
 
+// Neo4j value -> plain JSON a model can read in a prompt: Integers to numbers,
+// Nodes to {id: elementId, labels, ...every property} — every property, so the
+// driver route shows the model the same data the MCP route does (a missing
+// key would read as "has no website"). Relationships become their type.
+function probeValue(v: any): any {
+  if (v === null || v === undefined) return null
+  if (typeof v === 'object' && typeof v.toNumber === 'function') return v.toNumber()
+  if (Array.isArray(v)) return v.map(probeValue)
+  if (typeof v === 'object' && Array.isArray(v.labels) && v.elementId) {
+    const out: Record<string, any> = { id: v.elementId, labels: v.labels }
+    for (const [k, x] of Object.entries(v.properties ?? {})) out[k] = probeValue(x)
+    return out
+  }
+  if (typeof v === 'object' && typeof v.type === 'string' && v.elementId) return `[:${v.type}]`
+  if (typeof v === 'object') {
+    const out: Record<string, any> = {}
+    for (const [k, x] of Object.entries(v)) out[k] = probeValue(x)
+    return out
+  }
+  return v
+}
+
+// Run one READ query for the investigation loop over the direct driver (the
+// fallback when the local MCP server isn't up). Same read-mode transaction as
+// runReadCypher, so a write is rejected by the server, not just by a regex.
+export async function runProbe(cypher: string): Promise<Record<string, any>[]> {
+  if (!isLiveConfigured()) throw new Error('Neo4j not configured — add your Aura connection in Settings')
+  const { uri, user, pass, db } = creds()
+  const driver = neo4j.driver(uri!, neo4j.auth.basic(user!, pass!))
+  try {
+    const result = await driver.executeQuery(cypher, {}, { database: db, routing: 'READ' as any })
+    return result.records.map(rec => {
+      const row: Record<string, any> = {}
+      for (const key of rec.keys) row[key as string] = probeValue(rec.get(key))
+      return row
+    })
+  } finally {
+    await driver.close()
+  }
+}
+
 // Renders a query's actual scalar values into a short readable line, instead
 // of just a row count -- e.g. an aggregate query grouping/counting something
 // (exactly the shape smartPresets.ts's generated questions tend to produce)

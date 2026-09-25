@@ -121,6 +121,8 @@ export interface CallOptions {
   queueCap?: number;
   siteUrl?: string;
   appTitle?: string;
+  /** Aborts the in-flight request and stops trying further models. */
+  signal?: AbortSignal;
 }
 
 /** Raw text call. Tries preferred model then live free fallbacks; advances on 429/unavailable. */
@@ -155,6 +157,7 @@ export async function callOpenRouter(opts: CallOptions): Promise<{ text: string;
           max_tokens: opts.maxTokens ?? 3000,
           temperature: opts.temperature,
         }),
+        signal: opts.signal,
       });
 
       if (res.ok) {
@@ -192,6 +195,17 @@ export function parseJsonArray(raw: string): any[] {
   return parsed;
 }
 
+/** The model queue both JSON paths walk: preferred (if usable) → live free models → safety net. */
+async function modelQueue(opts: { apiKey: string; model?: string; queueCap?: number }): Promise<string[]> {
+  const cached = getCachedFreeModels() ?? (await fetchAndCacheFreeModels(opts.apiKey));
+  const usable = cached.filter((m) => !SKIP_MODEL_RE.test(m));
+  const wanted = opts.model && !SKIP_MODEL_RE.test(opts.model) && !DEPRIORITISE_RE.test(opts.model)
+    ? opts.model
+    : undefined;
+  return [...new Set([wanted, ...usable, ...FALLBACK_FREE_MODELS].filter(Boolean) as string[])]
+    .slice(0, opts.queueCap ?? 6);
+}
+
 /**
  * Generate a validated non-empty JSON array from a prompt. A model that returns
  * truncated / non-JSON output is treated as a failure and the next model is tried.
@@ -199,14 +213,7 @@ export function parseJsonArray(raw: string): any[] {
 export async function generateJSON(opts: Omit<CallOptions, 'messages'> & { prompt: string }): Promise<any[]> {
   if (!opts.apiKey) throw new Error('No API key configured. Add your OpenRouter key in Settings.');
 
-  const cached = getCachedFreeModels() ?? (await fetchAndCacheFreeModels(opts.apiKey));
-  const usable = cached.filter((m) => !SKIP_MODEL_RE.test(m));
-  const wanted = opts.model && !SKIP_MODEL_RE.test(opts.model) && !DEPRIORITISE_RE.test(opts.model)
-    ? opts.model
-    : undefined;
-  const queue = [...new Set([wanted, ...usable, ...FALLBACK_FREE_MODELS].filter(Boolean) as string[])]
-    .slice(0, opts.queueCap ?? 6);
-
+  const queue = await modelQueue(opts);
   let lastErr: unknown;
   for (const model of queue) {
     try {
@@ -217,4 +224,44 @@ export async function generateJSON(opts: Omit<CallOptions, 'messages'> & { promp
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('All models failed');
+}
+
+/**
+ * Multi-turn variant of generateJSON: send a whole conversation and validate the
+ * reply with `parse` (which throws on anything unusable) — inside the retry loop,
+ * so a truncated or malformed reply advances to the next model. Returns the model
+ * that answered, so a multi-step caller can stick with a model that works.
+ */
+export async function generateParsed<T>(
+  opts: CallOptions,
+  parse: (raw: string) => T,
+): Promise<{ value: T; model: string }> {
+  if (!opts.apiKey) throw new Error('No API key configured. Add your OpenRouter key in Settings.');
+
+  const queue = await modelQueue(opts);
+  let lastErr: unknown;
+  for (const model of queue) {
+    if (opts.signal?.aborted) throw new Error('Cancelled');
+    try {
+      // callOpenRouter may substitute a model (e.g. a deprioritised one), so
+      // report the one that actually answered.
+      const { text, model: used } = await callOpenRouter({ ...opts, model, queueCap: 1 });
+      return { value: parse(text), model: used };
+    } catch (err) {
+      if (opts.signal?.aborted) throw err; // cancelled — don't move on to the next model
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('All models failed');
+}
+
+/** Salvage + parse a single JSON object from a model response. Throws on failure. */
+export function parseJsonObject(raw: string): Record<string, any> {
+  let cleaned = String(raw).replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start !== -1 && end > start) cleaned = cleaned.slice(start, end + 1);
+  const parsed = JSON.parse(cleaned);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('model did not return a JSON object');
+  return parsed;
 }

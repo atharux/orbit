@@ -12,6 +12,7 @@ import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink, runReadCypher } from './neo4jSource'
 import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, verticalPresets, WRITE_RE, type AskResult, type Preset } from './ask'
+import { investigate, type Investigation, type InvestigationStep } from './investigate'
 import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { loadSmartPresets, generateSmartPresets, type SmartPreset } from './smartPresets'
 import { exportCsv } from '../storage'
@@ -268,6 +269,12 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [askResult, setAskResult] = useState<(AskResult & { q: string; queryId: string }) | null>(null)
   const [askOutcome, setAskOutcome] = useState<AskOutcome | null>(null)
   const [askError, setAskError] = useState('')
+  // Multi-step investigation (investigate.ts): the trail streams in step by step.
+  const [investigation, setInvestigation] = useState<(Investigation & { running: boolean }) | null>(null)
+  const investigateAbort = useRef<AbortController | null>(null)
+  // Closing the overlay mid-investigation stops it — otherwise it keeps
+  // spending the user's OpenRouter key and Aura reads in the background.
+  useEffect(() => () => investigateAbort.current?.abort(), [])
   const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
   const canAskLocal = !canAskLive && localAvailable(openRouterApiKey, graphData)
@@ -1034,7 +1041,8 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // helper so a fix to how one clears its errors can't drift from the
   // others the way runCypher's did before this pass (it cleared cypherError,
   // nothing else did).
-  const busy = asking || cypherRunning
+  const investigating = Boolean(investigation?.running)
+  const busy = asking || cypherRunning || investigating
   function clearTransientAskState() {
     setAskError(''); setCypherError(''); setAskNote('')
   }
@@ -1087,6 +1095,41 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
   function clearAsk() {
     setAskResult(null); setAskOutcome(null); clearTransientAskState(); setAskInput('')
+    graphRef.current?.focusNodes([])
+  }
+
+  // Test hypotheses against the live graph over several read-only queries
+  // instead of answering from one. Streams each step into the panel.
+  async function runInvestigation() {
+    const q = askInput.trim()
+    if (!q || busy || !canAskLive) return
+    clearTransientAskState(); setAskResult(null)
+    const ctrl = new AbortController()
+    investigateAbort.current = ctrl
+    const steps: InvestigationStep[] = []
+    setInvestigation({ question: q, steps, finding: null, stoppedBecause: 'concluded', running: true })
+    const result = await investigate(q, {
+      apiKey: openRouterApiKey!,
+      model: openRouterModel,
+      signal: ctrl.signal,
+      onStep: step => {
+        steps.push(step)
+        setInvestigation(prev => (prev ? { ...prev, steps: [...steps] } : prev))
+        if (step.nodeIds.length) graphRef.current?.focusNodes(step.nodeIds)
+      },
+    })
+    investigateAbort.current = null
+    setInvestigation({ ...result, running: false })
+    if (result.finding?.nodeIds.length) graphRef.current?.focusNodes(result.finding.nodeIds)
+  }
+
+  function stopInvestigation() {
+    investigateAbort.current?.abort()
+  }
+
+  function clearInvestigation() {
+    investigateAbort.current?.abort()
+    setInvestigation(null)
     graphRef.current?.focusNodes([])
   }
 
@@ -1623,6 +1666,16 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               {asking ? '…' : '→'}
             </button>
           </div>
+          {canAskLive && (
+            <button
+              style={{ ...styles.investigateBtn, opacity: busy || !askInput.trim() ? 0.5 : 1 }}
+              onClick={runInvestigation}
+              disabled={busy || !askInput.trim()}
+              title="Don't answer once: form a hypothesis, test it with read-only queries (over MCP when the local server is running), refine, then conclude."
+            >
+              {investigating ? 'Investigating…' : 'Investigate ⟳ — test hypotheses, not one query'}
+            </button>
+          )}
 
           <div style={styles.cypherHead}>
             <span>OR WRITE CYPHER DIRECTLY</span>
@@ -1682,6 +1735,57 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
           {askNote && <div style={styles.askInfo}>{askNote}</div>}
           {askError && <div style={styles.askErr}>{askError}</div>}
+
+          {investigation && (
+            <div style={styles.answer}>
+              <div style={styles.answerQ}>
+                INVESTIGATION · {investigation.question}
+              </div>
+              {investigation.steps.map(st => (
+                <div key={st.n} style={styles.invStep}>
+                  <div style={styles.invHyp}>
+                    <span style={styles.invNum}>{st.n}</span>
+                    {st.hypothesis || 'Testing a query'}
+                  </div>
+                  <div style={styles.invMeta}>
+                    <span style={{ ...styles.invVia, color: st.via === 'mcp' ? '#34d399' : st.via === 'refused' ? '#EF4444' : undefined }}>
+                      {st.via === 'mcp' ? 'MCP read_neo4j_cypher' : st.via === 'refused' ? 'refused' : 'driver (read-only)'}
+                    </span>
+                    {st.error ? <span style={{ color: '#EF4444' }}>{st.error}</span> : <span>{st.rows} row{st.rows === 1 ? '' : 's'}</span>}
+                  </div>
+                  <details>
+                    <summary style={styles.invSummary}>query + what the model saw</summary>
+                    <pre style={styles.cypher}>{st.cypher}</pre>
+                    <pre style={{ ...styles.cypher, color: undefined }}>{st.preview}</pre>
+                  </details>
+                </div>
+              ))}
+              {investigation.running && <div style={styles.askInfo}>Thinking about the next step…</div>}
+              {investigation.finding && (
+                <div style={styles.invFinding}>
+                  <div style={styles.invFindingHead}>
+                    FINDING · <span style={{ color: investigation.finding.confidence === 'high' ? '#34d399' : investigation.finding.confidence === 'medium' ? '#f97316' : '#EF4444' }}>
+                      {investigation.finding.confidence} confidence
+                    </span>
+                    {investigation.finding.nodeIds.length > 0 && ` · ${investigation.finding.nodeIds.length} evidence node${investigation.finding.nodeIds.length === 1 ? '' : 's'} lit`}
+                  </div>
+                  <div style={styles.answerA}>{investigation.finding.claim}</div>
+                </div>
+              )}
+              {!investigation.running && !investigation.finding && (
+                <div style={styles.askErr}>
+                  {investigation.stoppedBecause === 'cancelled' ? 'Stopped.'
+                    : investigation.stoppedBecause === 'step-cap' ? 'Ran out of queries without a conclusion — try a narrower question.'
+                    : `Investigation failed: ${investigation.error ?? 'unknown error'}`}
+                </div>
+              )}
+              <div style={styles.rateRow}>
+                {investigation.running
+                  ? <button style={styles.clearBtn} onClick={stopInvestigation}>stop</button>
+                  : <button style={styles.clearBtn} onClick={clearInvestigation}>clear</button>}
+              </div>
+            </div>
+          )}
 
           {askResult && (
             <div style={styles.answer}>
@@ -1994,6 +2098,18 @@ function makeStyles(mode: ThemeMode): Styles {
     answer: { marginTop: 10, borderTop: `1px solid ${t.border}`, paddingTop: 10 },
     answerQ: { fontSize: 10, color: t.faint, letterSpacing: '.04em' },
     answerA: { fontSize: 12.5, color: t.text, marginTop: 4, lineHeight: 1.5 },
+    investigateBtn: {
+      marginTop: 6, width: '100%', textAlign: 'left', background: 'transparent', border: `1px dashed ${t.accentDim}`,
+      borderRadius: 4, color: t.accent, cursor: 'pointer', fontSize: 10.5, padding: '6px 9px', fontFamily: mono,
+    },
+    invStep: { marginTop: 8, paddingLeft: 8, borderLeft: `2px solid ${t.border}` },
+    invHyp: { fontSize: 11.5, color: t.text2, lineHeight: 1.45, display: 'flex', gap: 6 },
+    invNum: { color: t.accent, fontWeight: 700, flexShrink: 0 },
+    invMeta: { display: 'flex', gap: 8, fontSize: 9.5, color: t.faint, marginTop: 3, flexWrap: 'wrap' },
+    invVia: { letterSpacing: '.06em', textTransform: 'uppercase' },
+    invSummary: { fontSize: 9.5, color: t.faint, cursor: 'pointer', marginTop: 3 },
+    invFinding: { marginTop: 10, padding: '8px 9px', border: `1px solid ${t.accentDim}`, borderRadius: 4, background: t.solid },
+    invFindingHead: { fontSize: 9, letterSpacing: '.12em', color: t.faint },
     cypher: {
       marginTop: 8, background: t.solid, border: `1px solid ${t.border}`, borderRadius: 4,
       padding: '8px 9px', color: t.cypher, fontSize: 10.5, lineHeight: 1.45,
