@@ -2,11 +2,13 @@
 // as a standing, written statement rather than a question — and re-derived
 // when the graph's data changes, so it never quietly goes out of date.
 //
-// Staleness is a fingerprint of the loaded graph (every node's id, kind and
-// the fields Orbit reads, every edge). When it differs from the one a card was
-// written against, the card is stale; the overlay re-runs stale cards when it
-// opens (a few per open, to bound OpenRouter use) and the rest can be
-// refreshed by hand. Kept in localStorage, like every other Orbit list.
+// Staleness is a fingerprint of the data: computed in Aura with APOC over
+// every property of Orbit's nodes and relationships (neo4jSource
+// fetchDataStamp), or — if that call fails — over the loaded graph here. When
+// it differs from the one a card was written against, the card is stale; the
+// overlay re-runs stale cards when it opens (a few per open, to bound
+// OpenRouter use) and the rest can be refreshed by hand. Kept in
+// localStorage, like every other Orbit list.
 import type { GraphData } from './types'
 import { investigate, type Investigation } from './investigate'
 
@@ -30,6 +32,7 @@ export interface Insight {
   stamp: string // data fingerprint the claim was derived from
   previousClaim?: string // the claim before the last refresh, if it changed
   lastError?: string // last refresh attempt failed (the claim above is the older one)
+  failedStamp?: string // data the last failed refresh ran against — not auto-retried until the data changes again
 }
 
 const LS_KEY = 'orbit.insights.v1'
@@ -52,12 +55,14 @@ export function saveInsights(list: Insight[]): void {
   }
 }
 
-// FNV-1a over a canonical dump of the graph — order-independent (sorted), so
-// the same data loaded twice gives the same stamp.
+// Fallback fingerprint when the server-side one can't be computed: FNV-1a over
+// a canonical dump of every field the loaded graph carries — order-independent
+// (sorted), so the same data loaded twice gives the same stamp. Coarser than
+// the APOC one: it can't see properties the canvas doesn't load.
 export function dataStamp(g: GraphData): string {
   const endId = (e: unknown) => (typeof e === 'object' && e !== null ? (e as { id: string }).id : String(e))
   const parts = [
-    ...g.nodes.map(n => `n|${n.id}|${n.kind}|${n.verified ?? ''}|${n.sub ?? ''}|${n.district ?? ''}|${n.website ?? ''}|${n.verticalId ?? ''}`),
+    ...g.nodes.map(n => `n|${n.id}|${n.kind}|${n.label}|${n.verified ?? ''}|${n.sub ?? ''}|${n.district ?? ''}|${n.website ?? ''}|${n.verticalId ?? ''}|${(n.apps ?? []).join(',')}|${n.lastShipped ?? ''}|${n.linkedinUrl ?? ''}`),
     ...g.links.map(l => `l|${endId(l.source)}|${l.kind}|${endId(l.target)}`),
   ].sort()
   let h = 0x811c9dc5
@@ -69,11 +74,22 @@ export function dataStamp(g: GraphData): string {
     h ^= 0x0a
     h = Math.imul(h, 0x01000193) >>> 0
   }
-  return `${g.nodes.length}n-${g.links.length}e-${h.toString(16)}`
+  return `local:${g.nodes.length}n-${g.links.length}e-${h.toString(16)}`
 }
 
 export function isStale(card: Insight, stamp: string): boolean {
   return card.stamp !== stamp
+}
+
+// Stale cards worth refreshing on their own: not already failed against this
+// exact data (a card that can't conclude would otherwise burn ~8 calls on
+// every open), oldest-confirmed first so nothing starves at the list's end.
+export function autoRefreshQueue(cards: Insight[], stamp: string, max: number): string[] {
+  return cards
+    .filter(c => isStale(c, stamp) && c.failedStamp !== stamp)
+    .sort((a, b) => a.writtenAt.localeCompare(b.writtenAt))
+    .slice(0, max)
+    .map(c => c.id)
 }
 
 function trailOf(inv: Investigation): InsightTrailStep[] {
@@ -112,17 +128,19 @@ export async function refreshInsight(
     const why = inv.stoppedBecause === 'cancelled' ? 'cancelled'
       : inv.stoppedBecause === 'step-cap' ? 'no conclusion within the query budget'
       : inv.error ?? 'failed'
-    return { ...card, lastError: why }
+    return { ...card, lastError: why, failedStamp: stamp }
   }
-  // Same numbers = same finding, whatever the wording: keep the card's words,
-  // just mark it re-checked. Decided in code, not by asking the model whether
-  // it changed its mind.
-  const unchanged = numbersOf(inv.finding.claim) === numbersOf(card.claim)
+  // Unchanged only if the model restated the claim itself (the re-check
+  // prompt asks for it verbatim; trailing commentary is tolerated). Any other
+  // wording counts as a change and keeps the old claim visible as "earlier" —
+  // a false "changed" is harmless, a false "unchanged" hides a new fact.
+  const unchanged = sameClaim(card.claim, inv.finding.claim)
   return {
     ...card,
     claim: unchanged ? card.claim : inv.finding.claim,
     confidence: inv.finding.confidence,
     nodeIds: inv.finding.nodeIds.length ? inv.finding.nodeIds : card.nodeIds,
+    failedStamp: undefined,
     trail: trailOf(inv),
     model: inv.steps[inv.steps.length - 1]?.model ?? card.model,
     writtenAt: new Date().toISOString(),
@@ -132,8 +150,10 @@ export async function refreshInsight(
   }
 }
 
-// The figures a claim asserts, order-independent ("194 of 545 (35.6%)" →
-// "194|35.6%|545"). Two claims with the same figures state the same finding.
-function numbersOf(claim: string): string {
-  return (claim.match(/\d+(?:[.,]\d+)*%?/g) ?? []).map(n => n.replace(/,/g, '')).sort().join('|')
+// Same claim = the new text is the old text (after normalising quotes,
+// case and whitespace), optionally followed by commentary.
+function sameClaim(before: string, after: string): boolean {
+  const norm = (t: string) => t.toLowerCase().replace(/[“”"'‘’]/g, '').replace(/\s+/g, ' ').trim()
+  const a = norm(before), b = norm(after)
+  return b === a || b.startsWith(a)
 }
