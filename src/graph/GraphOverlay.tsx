@@ -17,6 +17,7 @@ import { loadSmartPresets, generateSmartPresets, type SmartPreset } from './smar
 import { exportCsv } from '../storage'
 import { loadSequences, saveSequences, enrollLeads, newSequence } from '../sequences/store'
 import { openExternal } from '../utils/openExternal'
+import { LAYOUTS, computeLayout, isFlat, type LayoutMode } from './layouts'
 // Lazy: CypherEditor pulls in CodeMirror + the ANTLR-based Cypher grammar,
 // and only ever renders when meta?.origin === 'live' -- code-split so that
 // cost isn't paid by everyone loading the graph, only once a live Aura
@@ -279,6 +280,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   const [verifiedOnly, setVerifiedOnly] = useState(false)
   const [filterCount, setFilterCount] = useState<number | null>(null)
   const [verticals] = useState<Vertical[]>(loadAllVerticals)
+  const [layout, setLayout] = useState<LayoutMode>('force3d')
 
   useEffect(() => {
     let disposed = false
@@ -338,6 +340,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           : ct().linkRest[l.kind as GraphLink['kind']]
 
       const Graph = new ForceGraph3D(el, { controlType: 'orbit' })
+        // The library's own "Left-click: rotate…" footer is wrong once a flat
+        // layout remaps drag to pan; our hint line covers both modes.
+        .showNavInfo(false)
         .backgroundColor(ct().bg)
         .graphData(structuredClone(data))
         .nodeRelSize(4)
@@ -443,6 +448,108 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       controls.autoRotate = true
       controls.autoRotateSpeed = 0.55
 
+      // Layout engine (layouts.ts). Every path below that used to switch
+      // auto-rotate back on asks rotateAtRest() instead, so a flat layout
+      // never drifts sideways out of its head-on view.
+      let layout: LayoutMode = 'force3d'
+      const rotateAtRest = () => layout === 'force3d'
+      const orbitButtons = { ...controls.mouseButtons }
+      let layoutTween = 0
+      let layoutFitTimer: number | null = null
+      type XYZ = { x: number; y: number; z: number }
+
+      // Glide every node from where it is now to `targets` by pinning it
+      // (fx/fy/fz) along an eased path, so you can follow a node through the
+      // change instead of watching the graph teleport.
+      function tweenTo(targets: Map<string, XYZ>, ms: number, done?: () => void) {
+        cancelAnimationFrame(layoutTween)
+        const nodes = Graph.graphData().nodes as any[]
+        const from = new Map<string, XYZ>(nodes.map(n => [n.id, { x: n.x || 0, y: n.y || 0, z: n.z || 0 }]))
+        // Node meshes only move while the engine ticks, and it has usually
+        // cooled long before anyone picks a layout.
+        Graph.d3ReheatSimulation()
+        const t0 = performance.now()
+        const step = (now: number) => {
+          if (disposed) return
+          const k = Math.min(1, (now - t0) / ms)
+          const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2
+          for (const n of nodes) {
+            const a = from.get(n.id), b = targets.get(n.id)
+            if (!a || !b) continue
+            n.fx = a.x + (b.x - a.x) * e
+            n.fy = a.y + (b.y - a.y) * e
+            n.fz = a.z + (b.z - a.z) * e
+          }
+          if (k < 1) layoutTween = requestAnimationFrame(step)
+          else done?.()
+        }
+        layoutTween = requestAnimationFrame(step)
+      }
+
+      function releasePins(nodes: any[]) {
+        for (const n of nodes) { delete n.fx; delete n.fy; delete n.fz }
+      }
+
+      function fitLater(ms: number) {
+        if (layoutFitTimer !== null) window.clearTimeout(layoutFitTimer)
+        layoutFitTimer = window.setTimeout(() => { layoutFitTimer = null; if (!disposed) Graph.zoomToFit(700, 60) }, ms)
+      }
+
+      function applyLayout(next: LayoutMode) {
+        const prev = layout
+        layout = next
+        const nodes = Graph.graphData().nodes as any[]
+        const links = Graph.graphData().links as any[]
+        clearPopout()
+        controls.autoRotate = rotateAtRest() && highlightNodes.size === 0
+        // Flat layouts read like a map: left-drag pans, right-drag still
+        // rotates if you want to look at it edge-on.
+        controls.mouseButtons = isFlat(next)
+          ? { ...orbitButtons, LEFT: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE }
+          : { ...orbitButtons }
+
+        const fixed = computeLayout(next, nodes, links)
+        if (fixed) {
+          const targets = new Map<string, XYZ>()
+          for (const [id, p] of fixed) targets.set(id, { x: p.x, y: p.y, z: 0 })
+          // Fit once the tween has landed, not on a guessed timer — on a slow
+          // machine the nodes are still mid-flight at any fixed delay.
+          tweenTo(targets, 850, () => fitLater(120))
+        } else if (next === 'force2d') {
+          // Squash onto z = 0 in place, then hand back to a 2D simulation.
+          const targets = new Map<string, XYZ>(nodes.map(n => [n.id, { x: n.x || 0, y: n.y || 0, z: 0 }]))
+          tweenTo(targets, 600, () => {
+            releasePins(nodes)
+            for (const n of nodes) { n.z = 0; n.vz = 0 }
+            if (Graph.numDimensions() !== 2) Graph.numDimensions(2) // re-feeds + reheats the simulation
+            else Graph.d3ReheatSimulation()
+            fitLater(1200)
+          })
+        } else {
+          // Back to 3D. Coming off a flat layout every z is 0 and d3 would
+          // keep the graph planar forever, so lift nodes off the plane first.
+          const targets = new Map<string, XYZ>(nodes.map(n => [n.id, {
+            x: n.x || 0, y: n.y || 0, z: isFlat(prev) ? (Math.random() - 0.5) * 120 : n.z || 0,
+          }]))
+          tweenTo(targets, 600, () => {
+            releasePins(nodes)
+            // A 2D simulation never applies fz, so the tween alone can leave
+            // every z at 0 — and d3 only seeds z when it's missing. Write the
+            // lifted z onto the nodes themselves before going back to 3D.
+            for (const n of nodes) { n.z = targets.get(n.id)?.z ?? n.z; n.vz = 0 }
+            if (Graph.numDimensions() !== 3) Graph.numDimensions(3)
+            else Graph.d3ReheatSimulation()
+            fitLater(1200)
+          })
+        }
+
+        // Face the plane head-on; zoomToFit keeps this direction when it frames.
+        if (isFlat(next)) {
+          const d = Graph.camera().position.length() || 600
+          Graph.cameraPosition({ x: 0, y: 0, z: d }, { x: 0, y: 0, z: 0 }, 800)
+        }
+      }
+
       // Ambient "synaptic" heartbeat — a slow, sparse impulse that fires ONLY
       // along live/covered edges: a verified contact reaching its company, or a
       // sequence targeting a company. Cold prospects (no verified contact, not
@@ -511,9 +618,14 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
         // Fly the camera to the node.
         const dist = 120
-        const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1)
         const flightMs = 1400
-        Graph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, flightMs)
+        if (isFlat(layout)) {
+          // Stay head-on: fly straight down the z axis onto the node.
+          Graph.cameraPosition({ x: node.x, y: node.y, z: (node.z || 0) + dist }, node, flightMs)
+        } else {
+          const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1)
+          Graph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, flightMs)
+        }
 
         // Context chips pop out once the zoom lands, not before -- and only
         // for whichever node is still selected when the timer fires, so a
@@ -542,7 +654,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
           if (multiSel.has(s) && multiSel.has(t)) highlightLinks.add(l)
         }
         refreshHighlight()
-        controls.autoRotate = multiSel.size === 0
+        controls.autoRotate = multiSel.size === 0 && rotateAtRest()
         setSelectedIds([...multiSel])
       }
       function toggleSelect(id: string) {
@@ -560,7 +672,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
 
       Graph.onBackgroundClick(() => {
         focused = null
-        controls.autoRotate = true
+        controls.autoRotate = rotateAtRest()
         multiSel.clear()
         highlightNodes.clear()
         highlightLinks.clear()
@@ -612,7 +724,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         multiSel.clear()
         setSelected(null)
         clearPopout()
-        if (ids.length === 0) { controls.autoRotate = true; refreshHighlight(); setSelectedIds([]); return }
+        if (ids.length === 0) { controls.autoRotate = rotateAtRest(); refreshHighlight(); setSelectedIds([]); return }
         ids.forEach(id => { highlightNodes.add(id); multiSel.add(id) })
         for (const l of (Graph.graphData().links as any[])) {
           const s = typeof l.source === 'object' ? l.source.id : l.source
@@ -651,7 +763,13 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       // fit once the layout settles
       setTimeout(() => Graph.zoomToFit(1200, 60), 700)
 
-      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer, clearPopout }
+      function stopLayout() {
+        cancelAnimationFrame(layoutTween)
+        if (layoutFitTimer !== null) window.clearTimeout(layoutFitTimer)
+      }
+      const fit = () => Graph.zoomToFit(700, 60)
+
+      graphRef.current = { Graph, onResize, focusNodes, selectNodeById, applyTheme, impulseTimer, clearPopout, applyLayout, stopLayout, fit }
       void focused
     }
 
@@ -661,6 +779,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       if (g) {
         window.removeEventListener('resize', g.onResize)
         clearInterval(g.impulseTimer)
+        g.stopLayout()
         g.clearPopout() // cancel any pending "chips pop in" timer -- setPopout after unmount would be a no-op warning otherwise
         g.Graph._destructor?.()
       }
@@ -668,6 +787,11 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  function chooseLayout(next: LayoutMode) {
+    setLayout(next)
+    graphRef.current?.applyLayout(next)
+  }
 
   // Re-skin the canvas when the theme flips.
   useEffect(() => {
@@ -1021,6 +1145,17 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         )}
         {meta && <div style={styles.counts}>{meta.nodes} nodes · {meta.links} edges</div>}
         <div style={{ flex: 1 }} />
+        {status === 'ready' && (
+          <>
+            <label style={styles.layoutLabel} title={LAYOUTS.find(l => l.mode === layout)?.hint}>
+              LAYOUT
+              <select style={styles.layoutSelect} value={layout} onChange={e => chooseLayout(e.target.value as LayoutMode)}>
+                {LAYOUTS.map(l => <option key={l.mode} value={l.mode} title={l.hint}>{l.label}</option>)}
+              </select>
+            </label>
+            <button style={styles.themeBtn} onClick={() => graphRef.current?.fit()} title="Frame the whole graph">Fit ⤢</button>
+          </>
+        )}
         <button
           style={styles.themeBtn}
           onClick={() => setTheme(m => (m === 'dark' ? 'light' : 'dark'))}
@@ -1406,7 +1541,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         </div>
       )}
 
-      <div style={styles.hint}>drag to orbit · scroll to zoom · click to fly in · shift-click to multi-select</div>
+      <div style={styles.hint}>
+        {isFlat(layout) ? 'drag to pan · right-drag to tilt' : 'drag to orbit'} · scroll to zoom · click to fly in · shift-click to multi-select
+      </div>
     </div>
   )
 }
@@ -1735,6 +1872,11 @@ function makeStyles(mode: ThemeMode): Styles {
     themeBtn: {
       fontFamily: mono, fontSize: 11, color: t.text, background: t.btn,
       border: `1px solid ${t.border}`, borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+    },
+    layoutLabel: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 9, letterSpacing: '.16em', color: t.faint },
+    layoutSelect: {
+      fontFamily: mono, fontSize: 11, color: t.text, background: t.btn, letterSpacing: 0,
+      border: `1px solid ${t.border}`, borderRadius: 4, padding: '5px 8px', cursor: 'pointer',
     },
   }
 }
