@@ -162,6 +162,37 @@ export async function runProbe(cypher: string): Promise<Record<string, any>[]> {
   }
 }
 
+// Fingerprint of Orbit's data in Aura — every property of every Venue/Contact/
+// Source/Sequence node and every relationship between them — hashed on the
+// server with APOC, so it sees fields the canvas never loads (a contact's
+// status, a lead's full record). Used by insight cards to know when the data
+// under a finding changed. Read-only; ~0.2–0.9 s on the live graph.
+export async function fetchDataStamp(): Promise<string> {
+  if (!isLiveConfigured()) throw new Error('Neo4j not configured')
+  const { uri, user, pass, db } = creds()
+  const driver = neo4j.driver(uri!, neo4j.auth.basic(user!, pass!))
+  try {
+    const result = await driver.executeQuery(
+      `MATCH (n) WHERE n:Venue OR n:Contact OR n:Source OR n:Sequence
+       WITH n ORDER BY elementId(n)
+       WITH collect([elementId(n), labels(n), properties(n)]) AS nodes
+       CALL {
+         MATCH (a)-[r]->(b)
+         WHERE (a:Venue OR a:Contact OR a:Source OR a:Sequence) AND (b:Venue OR b:Contact OR b:Source OR b:Sequence)
+         WITH r ORDER BY elementId(r)
+         RETURN collect([elementId(startNode(r)), type(r), elementId(endNode(r)), properties(r)]) AS rels
+       }
+       RETURN apoc.hashing.fingerprint(nodes) AS nodeFp, apoc.hashing.fingerprint(rels) AS relFp`,
+      {},
+      { database: db, routing: 'READ' as any },
+    )
+    const rec = result.records[0]
+    return `apoc:${rec.get('nodeFp')}-${rec.get('relFp')}`
+  } finally {
+    await driver.close()
+  }
+}
+
 // Renders a query's actual scalar values into a short readable line, instead
 // of just a row count -- e.g. an aggregate query grouping/counting something
 // (exactly the shape smartPresets.ts's generated questions tend to produce)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, lazy, Suspense } from 'react'
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import SpriteText from 'three-spritetext'
@@ -10,9 +10,10 @@ import type { GraphData, GraphNode, GraphLink } from './types'
 import { KIND_COLOR, KIND_LABEL } from './types'
 import { buildGraphFromLeads } from './buildGraph'
 import { sampleGraph } from './sampleGraph'
-import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink, runReadCypher } from './neo4jSource'
+import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink, runReadCypher, fetchDataStamp } from './neo4jSource'
 import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, verticalPresets, WRITE_RE, type AskResult, type Preset } from './ask'
 import { investigate, type Investigation, type InvestigationStep } from './investigate'
+import { autoRefreshQueue, dataStamp, insightFrom, isStale, loadInsights, refreshInsight, saveInsights, type Insight } from './insights'
 import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { loadSmartPresets, generateSmartPresets, type SmartPreset } from './smartPresets'
 import { exportCsv } from '../storage'
@@ -275,6 +276,25 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   // Closing the overlay mid-investigation stops it — otherwise it keeps
   // spending the user's OpenRouter key and Aura reads in the background.
   useEffect(() => () => investigateAbort.current?.abort(), [])
+
+  // Insight cards (insights.ts): pinned findings, re-derived when the data changes.
+  const [insights, setInsights] = useState<Insight[]>(loadInsights)
+  const [refreshing, setRefreshing] = useState<Set<string>>(new Set())
+  const insightsAbort = useRef<AbortController | null>(null)
+  const autoRefreshedFor = useRef<string | null>(null)
+  useEffect(() => () => insightsAbort.current?.abort(), [])
+  // Latest list for the (async) refresh loop — it must see deletions made
+  // while it runs, not the list as it was when it started.
+  const insightsRef = useRef(insights)
+  insightsRef.current = insights
+  function updateInsights(fn: (prev: Insight[]) => Insight[]) {
+    setInsights(prev => {
+      const next = fn(prev)
+      saveInsights(next)
+      insightsRef.current = next
+      return next
+    })
+  }
   const [askNote, setAskNote] = useState('')
   const canAskLive = liveAvailable(openRouterApiKey)
   const canAskLocal = !canAskLive && localAvailable(openRouterApiKey, graphData)
@@ -1123,6 +1143,53 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
     if (result.finding?.nodeIds.length) graphRef.current?.focusNodes(result.finding.nodeIds)
   }
 
+  // How many stale cards refresh on their own when the graph opens; the rest
+  // wait for a click. Each refresh is a full investigation (up to ~8 calls).
+  const AUTO_REFRESH_MAX = 3
+
+  function pinInsight() {
+    if (!investigation || !stamp) return
+    const card = insightFrom(investigation, stamp)
+    if (card) updateInsights(prev => [card, ...prev])
+  }
+
+  // Cards are refreshed one at a time through a single queue, so a manual ↻
+  // on a card that's already queued can't start a second, parallel run.
+  const refreshQueue = useRef<string[]>([])
+  const refreshLoopRunning = useRef(false)
+  function refreshCards(ids: string[]) {
+    if (!canAskLive || !stamp || meta?.origin !== 'live') return
+    const fresh = ids.filter(id => !refreshing.has(id) && !refreshQueue.current.includes(id))
+    if (!fresh.length) return
+    refreshQueue.current.push(...fresh)
+    setRefreshing(prev => { const n = new Set(prev); fresh.forEach(id => n.add(id)); return n }) // queued = shown as re-deriving
+    if (!refreshLoopRunning.current) void runRefreshLoop(stamp)
+  }
+  async function runRefreshLoop(forStamp: string) {
+    refreshLoopRunning.current = true
+    const ctrl = insightsAbort.current ?? new AbortController()
+    insightsAbort.current = ctrl
+    try {
+      while (refreshQueue.current.length && !ctrl.signal.aborted) {
+        const id = refreshQueue.current.shift()!
+        const card = insightsRef.current.find(c => c.id === id) // deleted meanwhile → skip
+        if (card) {
+          const next = await refreshInsight(card, forStamp, { apiKey: openRouterApiKey!, model: openRouterModel, signal: ctrl.signal })
+          if (ctrl.signal.aborted) return
+          if (insightsRef.current.some(c => c.id === id)) updateInsights(prev => prev.map(c => (c.id === id ? next : c)))
+        }
+        setRefreshing(prev => { const n = new Set(prev); n.delete(id); return n })
+      }
+    } finally {
+      refreshLoopRunning.current = false
+    }
+  }
+
+  function deleteInsight(id: string) {
+    refreshQueue.current = refreshQueue.current.filter(q => q !== id)
+    updateInsights(prev => prev.filter(c => c.id !== id))
+  }
+
   function stopInvestigation() {
     investigateAbort.current?.abort()
   }
@@ -1270,6 +1337,27 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }
 
   const stats = graphData ? computeStats(graphData) : null
+  // Only live data can confirm or stale a card: local/sample fallbacks are a
+  // different dataset, not "new data". Fingerprinted server-side (APOC, every
+  // property) when possible, else over the loaded graph.
+  const [stamp, setStamp] = useState<string | null>(null)
+  const localStamp = useMemo(() => (graphData && meta?.origin === 'live' ? dataStamp(graphData) : null), [graphData, meta?.origin])
+  useEffect(() => {
+    if (!localStamp) { setStamp(null); return }
+    let cancelled = false
+    fetchDataStamp()
+      .then(s => { if (!cancelled) setStamp(s) })
+      .catch(() => { if (!cancelled) setStamp(localStamp) })
+    return () => { cancelled = true }
+  }, [localStamp])
+  // New data landed → re-derive stale cards, a few per open, once per stamp.
+  useEffect(() => {
+    if (!stamp || !canAskLive || autoRefreshedFor.current === stamp) return
+    autoRefreshedFor.current = stamp
+    const queue = autoRefreshQueue(insights, stamp, AUTO_REFRESH_MAX)
+    if (queue.length) refreshCards(queue)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stamp, canAskLive])
   const neighbors = graphData && selected ? neighborsOf(graphData, selected.id) : []
   // The real lead behind the selected node (venue/contact on a leads graph),
   // driving the action bar. Re-derived from the live `leads` prop so a status
@@ -1475,6 +1563,45 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
                   {stats.uncovered} {stats.uncovered === 1 ? 'company' : 'companies'} with no verified contact →
                 </button>
               )}
+            </div>
+          )}
+
+          {insights.length > 0 && (
+            <div style={styles.insights}>
+              <div style={styles.statsHead}>
+                INSIGHTS · {insights.length}
+                <span style={styles.insightsHint}>{stamp ? ' re-run when data changes' : localStamp ? ' checking data…' : ' offline — not checked'}</span>
+              </div>
+              {insights.map(card => {
+                const busyCard = refreshing.has(card.id)
+                const stale = stamp ? isStale(card, stamp) : false
+                const queries = card.trail.filter(t => t.via !== 'refused').length
+                const viaMcp = card.trail.some(t => t.via === 'mcp')
+                return (
+                  <div key={card.id} style={styles.insightCard}>
+                    <div
+                      style={styles.insightClaim}
+                      onClick={() => card.nodeIds.length && graphRef.current?.focusNodes(card.nodeIds)}
+                      title={`${card.question}\n\nClick to light up the evidence.`}
+                    >
+                      {card.claim}
+                    </div>
+                    {card.previousClaim && <div style={styles.insightPrev} title="What this card said before its last refresh">earlier: {card.previousClaim}</div>}
+                    <div style={styles.insightMeta}>
+                      <span style={{ color: card.confidence === 'high' ? '#34d399' : card.confidence === 'medium' ? '#f97316' : '#EF4444' }}>{card.confidence}</span>
+                      <span>{new Date(card.writtenAt).toLocaleDateString()}</span>
+                      <span>{queries} quer{queries === 1 ? 'y' : 'ies'}{viaMcp ? ' · MCP' : ''}</span>
+                      {busyCard ? <span style={{ color: CANVAS[theme].node.venue }}>re-deriving…</span>
+                        : stale ? <span style={{ color: '#f97316' }}>stale — data changed</span>
+                        : stamp ? <span>current</span> : localStamp ? <span>checking…</span> : <span>not checked</span>}
+                      {card.lastError && !busyCard && <span style={{ color: '#EF4444' }} title={card.lastError}>refresh failed</span>}
+                      <span style={{ flex: 1 }} />
+                      <button style={styles.insightBtn} disabled={busyCard || !stamp || !canAskLive} onClick={() => refreshCards([card.id])} title="Re-derive now">↻</button>
+                      <button style={styles.insightBtn} onClick={() => deleteInsight(card.id)} title="Remove">✕</button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -1770,6 +1897,16 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
                     {investigation.finding.nodeIds.length > 0 && ` · ${investigation.finding.nodeIds.length} evidence node${investigation.finding.nodeIds.length === 1 ? '' : 's'} lit`}
                   </div>
                   <div style={styles.answerA}>{investigation.finding.claim}</div>
+                  {stamp && (() => {
+                    // One card per question: a refreshed card's claim changes, the question doesn't.
+                    const pinned = insights.some(c => c.question === investigation.question)
+                    return (
+                      <button style={{ ...styles.editCypherBtn, opacity: pinned ? 0.5 : 1 }} onClick={pinInsight} disabled={pinned}
+                        title="Keep this as a standing insight card — it re-runs itself when the graph's data changes">
+                        {pinned ? 'Pinned as insight ✓' : 'Pin as insight ⌖'}
+                      </button>
+                    )
+                  })()}
                 </div>
               )}
               {!investigation.running && !investigation.finding && (
@@ -2110,6 +2247,20 @@ function makeStyles(mode: ThemeMode): Styles {
     invSummary: { fontSize: 9.5, color: t.faint, cursor: 'pointer', marginTop: 3 },
     invFinding: { marginTop: 10, padding: '8px 9px', border: `1px solid ${t.accentDim}`, borderRadius: 4, background: t.solid },
     invFindingHead: { fontSize: 9, letterSpacing: '.12em', color: t.faint },
+    insights: {
+      flexShrink: 1, minHeight: 0, overflowY: 'auto', pointerEvents: 'auto', maxHeight: '42vh',
+      background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8, padding: 14,
+      fontFamily: mono, color: t.text, boxShadow: t.shadow,
+    },
+    insightsHint: { color: t.faint, letterSpacing: 0, textTransform: 'none' },
+    insightCard: { marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border2}` },
+    insightClaim: { fontSize: 11.5, lineHeight: 1.45, color: t.text, cursor: 'pointer' },
+    insightPrev: { fontSize: 10, lineHeight: 1.4, color: t.faint, marginTop: 4, fontStyle: 'italic' },
+    insightMeta: { display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', fontSize: 9.5, color: t.faint, marginTop: 6 },
+    insightBtn: {
+      background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 3, color: t.muted,
+      cursor: 'pointer', fontSize: 10, padding: '1px 6px', fontFamily: mono,
+    },
     cypher: {
       marginTop: 8, background: t.solid, border: `1px solid ${t.border}`, borderRadius: 4,
       padding: '8px 9px', color: t.cypher, fontSize: 10.5, lineHeight: 1.45,
