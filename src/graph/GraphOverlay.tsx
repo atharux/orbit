@@ -13,6 +13,7 @@ import { sampleGraph } from './sampleGraph'
 import { isLiveConfigured, fetchLiveGraph, liveInstanceInfo, browserDeepLink, runReadCypher, fetchDataStamp } from './neo4jSource'
 import { PRESETS, askLive, askLocal, liveAvailable, localAvailable, findShortestPath, verticalPresets, WRITE_RE, type AskResult, type Preset } from './ask'
 import { investigate, type Investigation, type InvestigationStep } from './investigate'
+import { analyzeStructure, renderStructure } from './structure'
 import { autoRefreshQueue, dataStamp, insightFrom, isStale, loadInsights, refreshInsight, saveInsights, type Insight } from './insights'
 import { logAsk, logOutcome, type AskOutcome } from './askLog'
 import { loadSmartPresets, generateSmartPresets, type SmartPreset } from './smartPresets'
@@ -1132,6 +1133,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
       apiKey: openRouterApiKey!,
       model: openRouterModel,
       signal: ctrl.signal,
+      structure: structureTool,
       onStep: step => {
         steps.push(step)
         setInvestigation(prev => (prev ? { ...prev, steps: [...steps] } : prev))
@@ -1174,7 +1176,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
         const id = refreshQueue.current.shift()!
         const card = insightsRef.current.find(c => c.id === id) // deleted meanwhile → skip
         if (card) {
-          const next = await refreshInsight(card, forStamp, { apiKey: openRouterApiKey!, model: openRouterModel, signal: ctrl.signal })
+          const next = await refreshInsight(card, forStamp, { apiKey: openRouterApiKey!, model: openRouterModel, signal: ctrl.signal, structure: structureTool })
           if (ctrl.signal.aborted) return
           if (insightsRef.current.some(c => c.id === id)) updateInsights(prev => prev.map(c => (c.id === id ? next : c)))
         }
@@ -1337,6 +1339,14 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
   }
 
   const stats = graphData ? computeStats(graphData) : null
+  // Structural signal (structure.ts): computed in-app over the loaded graph.
+  const structure = useMemo(() => (graphData ? analyzeStructure(graphData) : null), [graphData])
+  // The same analysis as one step the investigation loop can take — only when
+  // the canvas holds the live graph the loop's Cypher queries. On a local/sample
+  // fallback it would describe a different graph (and offer its ids as evidence).
+  const structureTool = structure && meta?.origin === 'live'
+    ? () => ({ text: renderStructure(structure), nodeIds: [...structure.bridges.map(b => b.id), ...structure.largestClusterIds] })
+    : undefined
   // Only live data can confirm or stale a card: local/sample fallbacks are a
   // different dataset, not "new data". Fingerprinted server-side (APOC, every
   // property) when possible, else over the loaded graph.
@@ -1575,7 +1585,7 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
               {insights.map(card => {
                 const busyCard = refreshing.has(card.id)
                 const stale = stamp ? isStale(card, stamp) : false
-                const queries = card.trail.filter(t => t.via !== 'refused').length
+                const queries = card.trail.filter(t => t.via !== 'refused').length // structure steps count too
                 const viaMcp = card.trail.some(t => t.via === 'mcp')
                 return (
                   <div key={card.id} style={styles.insightCard}>
@@ -1840,6 +1850,38 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
             </div>
           )}
 
+          {structure && structure.nodes > 0 && (
+            <div style={styles.structureBox}>
+              <div style={styles.presetCategoryHead} title={`Computed in the app (graphology): connected clusters, Louvain communities, betweenness centrality. Scope: ${structure.scope}.`}>
+                STRUCTURE · in-app graph algorithms
+              </div>
+              <div style={styles.structureLine}>
+                {structure.nodes} people &amp; companies · {structure.edges} links · {structure.clusters} separate clusters (largest {structure.largestClusterIds.length}) · {structure.isolatedIds.length} unconnected
+              </div>
+              <div style={styles.structureLine}>
+                {structure.bridges.length
+                  ? `${structure.bridges.length} bridge${structure.bridges.length === 1 ? '' : 's'} — top: ${structure.bridges[0].label} (spans ${structure.bridges[0].communitiesTouched} communities)`
+                  : `No bridges yet — ${structure.whyNoBridges}.`}
+              </div>
+              <div style={styles.presetList}>
+                <button style={styles.presetChip} disabled={!structure.isolatedIds.length} onClick={() => graphRef.current?.focusNodes(structure.isolatedIds)}>
+                  Unconnected ({structure.isolatedIds.length})
+                </button>
+                <button style={styles.presetChip} disabled={structure.largestClusterIds.length < 2} onClick={() => graphRef.current?.focusNodes(structure.largestClusterIds)}>
+                  Largest cluster ({structure.largestClusterIds.length})
+                </button>
+                <button
+                  style={{ ...styles.presetChip, opacity: structure.bridges.length ? 1 : 0.45 }}
+                  disabled={!structure.bridges.length}
+                  title={structure.bridges.length ? 'Nodes whose links span separate communities' : `None yet — ${structure.whyNoBridges}`}
+                  onClick={() => graphRef.current?.focusNodes(structure.bridges.map(b => b.id))}
+                >
+                  Bridges ({structure.bridges.length})
+                </button>
+              </div>
+            </div>
+          )}
+
           <div style={styles.presetScroll}>
             {presetGroups.filter(grp => grp.presets.length > 0 || (grp.verticalId && smartGenerating.has(grp.verticalId))).map(grp => (
               <div key={grp.name}>
@@ -1876,9 +1918,9 @@ export function GraphOverlay({ leads, onClose, openRouterApiKey, openRouterModel
                   </div>
                   <div style={styles.invMeta}>
                     <span style={{ ...styles.invVia, color: st.via === 'mcp' ? '#34d399' : st.via === 'refused' ? '#EF4444' : undefined }}>
-                      {st.via === 'mcp' ? 'MCP read_neo4j_cypher' : st.via === 'refused' ? 'refused' : 'driver (read-only)'}
+                      {st.via === 'mcp' ? 'MCP read_neo4j_cypher' : st.via === 'refused' ? 'refused' : st.via === 'in-app' ? 'in-app graph algorithms' : 'driver (read-only)'}
                     </span>
-                    {st.error ? <span style={{ color: '#EF4444' }}>{st.error}</span> : <span>{st.rows} row{st.rows === 1 ? '' : 's'}</span>}
+                    {st.error ? <span style={{ color: '#EF4444' }}>{st.error}</span> : st.via === 'in-app' ? <span>structure report</span> : <span>{st.rows} row{st.rows === 1 ? '' : 's'}</span>}
                   </div>
                   <details>
                     <summary style={styles.invSummary}>query + what the model saw</summary>
@@ -2247,6 +2289,8 @@ function makeStyles(mode: ThemeMode): Styles {
     invSummary: { fontSize: 9.5, color: t.faint, cursor: 'pointer', marginTop: 3 },
     invFinding: { marginTop: 10, padding: '8px 9px', border: `1px solid ${t.accentDim}`, borderRadius: 4, background: t.solid },
     invFindingHead: { fontSize: 9, letterSpacing: '.12em', color: t.faint },
+    structureBox: { marginTop: 12 },
+    structureLine: { fontSize: 10.5, lineHeight: 1.45, color: t.muted, marginTop: 4 },
     insights: {
       flexShrink: 1, minHeight: 0, overflowY: 'auto', pointerEvents: 'auto', maxHeight: '42vh',
       background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8, padding: 14,

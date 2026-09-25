@@ -17,7 +17,7 @@ export interface InvestigationStep {
   n: number
   hypothesis: string
   cypher: string
-  via: 'mcp' | 'driver' | 'refused'
+  via: 'mcp' | 'driver' | 'refused' | 'in-app'
   rows: number
   preview: string // what the model was shown
   nodeIds: string[]
@@ -41,6 +41,7 @@ export interface Investigation {
 
 type Turn =
   | { action: 'query'; hypothesis: string; cypher: string }
+  | { action: 'structure'; hypothesis: string }
   | { action: 'conclude'; finding: string; confidence: Finding['confidence']; evidence_ids: string[] }
 
 const MIN_QUERIES = 2 // a conclusion needs its result checked at least once
@@ -50,7 +51,11 @@ const MAX_STR = 80
 // elementId format on Neo4j 5: "<db>:<uuid>:<n>"
 const ELEMENT_ID_RE = /^\d+:[0-9a-f-]{36}:\d+$/i
 
-function systemPrompt(maxSteps: number): string {
+function systemPrompt(maxSteps: number, hasStructure: boolean): string {
+  const structure = hasStructure
+    ? `\nor, to see the graph's structure (graph algorithms run in the app — clusters, communities, and which people/companies bridge separate groups; counts as one query):
+{"action":"structure","hypothesis":"what you expect the structure to show"}`
+    : ''
   return `You are investigating a Neo4j graph to answer a question. Work like an analyst:
 form a hypothesis, test it with ONE read-only Cypher query, look at the result, then
 refine, test an alternative explanation, or conclude. Don't conclude from a single query
@@ -59,7 +64,7 @@ unless its result is decisive; do check the obvious alternative before you do.
 ${GRAPH_SCHEMA}
 
 Reply with exactly ONE JSON object and nothing else — no prose, no markdown fences:
-{"action":"query","hypothesis":"what you expect to see and why","cypher":"MATCH ..."}
+{"action":"query","hypothesis":"what you expect to see and why","cypher":"MATCH ..."}${structure}
 or, when you can answer:
 {"action":"conclude","finding":"1-2 sentences stating what is true, with the numbers you saw","confidence":"low|medium|high","evidence_ids":["<id>", ...]}
 
@@ -79,6 +84,7 @@ function parseTurn(raw: string): Turn {
     if (typeof o.cypher !== 'string' || !o.cypher.trim()) throw new Error('query turn without cypher')
     return { action: 'query', hypothesis: String(o.hypothesis ?? '').trim(), cypher: o.cypher.trim() }
   }
+  if (o.action === 'structure') return { action: 'structure', hypothesis: String(o.hypothesis ?? '').trim() }
   if (o.action === 'conclude') {
     if (typeof o.finding !== 'string' || !o.finding.trim()) throw new Error('conclude turn without finding')
     const confidence = ['low', 'medium', 'high'].includes(o.confidence) ? o.confidence : 'low'
@@ -135,6 +141,8 @@ export async function investigate(
     signal?: AbortSignal
     /** A standing claim to re-check (insight refresh) rather than start from scratch. */
     recheck?: string
+    /** In-app structural analysis the model may call as one step (structure.ts). */
+    structure?: () => { text: string; nodeIds: string[] }
   },
 ): Promise<Investigation> {
   const maxSteps = opts.maxSteps ?? 6
@@ -143,7 +151,7 @@ export async function investigate(
     ? `\n\nA standing insight currently says: "${opts.recheck}"\nRe-check that claim against the current data. If its numbers still hold, conclude with the original claim word for word — no commentary about it being unchanged. If anything changed, state the new numbers and say what changed.`
     : ''
   const messages: AIMessage[] = [
-    { role: 'system', content: systemPrompt(maxSteps) },
+    { role: 'system', content: systemPrompt(maxSteps, Boolean(opts.structure)) },
     { role: 'user', content: `Question: ${question}${recheck}` },
   ]
   const steps: InvestigationStep[] = []
@@ -190,10 +198,22 @@ export async function investigate(
       if (steps.length >= maxSteps) break // told it had no queries left, and it still didn't conclude
 
       const step: InvestigationStep = {
-        n: steps.length + 1, hypothesis: value.hypothesis, cypher: value.cypher,
+        n: steps.length + 1, hypothesis: value.hypothesis,
+        cypher: value.action === 'query' ? value.cypher : '(graph algorithms in the app: connected clusters, Louvain communities, betweenness centrality)',
         via: 'driver', rows: 0, preview: '', nodeIds: [], model: used,
       }
-      if (WRITE_RE.test(value.cypher)) {
+      if (value.action === 'structure') {
+        step.via = 'in-app'
+        if (!opts.structure) {
+          step.error = 'Structure analysis is not available here.'
+          step.preview = step.error
+        } else {
+          const r = opts.structure()
+          step.preview = r.text
+          step.nodeIds = r.nodeIds.slice(0, MAX_ROWS_KEPT)
+          step.nodeIds.forEach(id => seen.add(id))
+        }
+      } else if (WRITE_RE.test(value.cypher)) {
         step.via = 'refused'
         step.error = 'Refused: not a read-only query.'
         step.preview = step.error
@@ -223,7 +243,7 @@ export async function investigate(
       const left = maxSteps - steps.length
       messages.push({
         role: 'user',
-        content: `Result of query ${step.n}${step.via === 'mcp' ? ' (via MCP read_neo4j_cypher)' : ''}:\n${step.preview}\n\n` +
+        content: `Result of ${step.via === 'in-app' ? 'structure analysis' : 'query'} ${step.n}${step.via === 'mcp' ? ' (via MCP read_neo4j_cypher)' : ''}:\n${step.preview}\n\n` +
           (left > 0 ? `${left} quer${left === 1 ? 'y' : 'ies'} left.` : 'No queries left — reply with a conclude object now.'),
       })
     }

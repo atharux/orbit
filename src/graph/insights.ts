@@ -15,7 +15,7 @@ import { investigate, type Investigation } from './investigate'
 export interface InsightTrailStep {
   hypothesis: string
   cypher: string
-  via: 'mcp' | 'driver' | 'refused'
+  via: 'mcp' | 'driver' | 'refused' | 'in-app'
   rows: number
   error?: string
 }
@@ -118,12 +118,12 @@ export function insightFrom(inv: Investigation, stamp: string): Insight | null {
 export async function refreshInsight(
   card: Insight,
   stamp: string,
-  opts: { apiKey: string; model?: string; signal?: AbortSignal },
+  opts: { apiKey: string; model?: string; signal?: AbortSignal; structure?: () => { text: string; nodeIds: string[] } },
 ): Promise<Insight> {
   // A refresh re-checks the standing claim rather than re-investigating from
   // scratch — otherwise every refresh rewrites the card in new words even when
   // nothing changed, and "earlier" stops meaning anything.
-  const inv = await investigate(card.question, { apiKey: opts.apiKey, model: opts.model, signal: opts.signal, recheck: card.claim })
+  const inv = await investigate(card.question, { apiKey: opts.apiKey, model: opts.model, signal: opts.signal, recheck: card.claim, structure: opts.structure })
   if (!inv.finding) {
     const why = inv.stoppedBecause === 'cancelled' ? 'cancelled'
       : inv.stoppedBecause === 'step-cap' ? 'no conclusion within the query budget'
