@@ -133,13 +133,18 @@ export async function investigate(
     maxSteps?: number
     onStep?: (step: InvestigationStep) => void
     signal?: AbortSignal
+    /** A standing claim to re-check (insight refresh) rather than start from scratch. */
+    recheck?: string
   },
 ): Promise<Investigation> {
   const maxSteps = opts.maxSteps ?? 6
   const signal = opts.signal
+  const recheck = opts.recheck
+    ? `\n\nA standing insight currently says: "${opts.recheck}"\nRe-check that claim against the current data. If its numbers still hold, conclude with the original claim word for word — no commentary about it being unchanged. If anything changed, state the new numbers and say what changed.`
+    : ''
   const messages: AIMessage[] = [
     { role: 'system', content: systemPrompt(maxSteps) },
-    { role: 'user', content: `Question: ${question}` },
+    { role: 'user', content: `Question: ${question}${recheck}` },
   ]
   const steps: InvestigationStep[] = []
   const seen = new Set<string>()
